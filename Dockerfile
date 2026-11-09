@@ -3,14 +3,14 @@
 FROM node:22-bookworm-slim AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
-ENV npm_config_registry=https://registry.npmmirror.com
-RUN corepack enable
+# 固定 pnpm 9（与本地开发一致；pnpm 10+ 会拦截依赖构建脚本），并走国内镜像
+RUN npm install -g pnpm@9 --registry=https://registry.npmmirror.com
 
 # ---------- 前端 ----------
 FROM base AS web-build
 WORKDIR /app
 COPY web/package.json web/pnpm-lock.yaml* ./
-RUN pnpm install
+RUN pnpm install --registry=https://registry.npmmirror.com
 COPY web/ ./
 RUN pnpm build
 
@@ -21,7 +21,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends openssl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY backend/package.json backend/pnpm-lock.yaml* ./
-RUN pnpm install
+# 先跳过 postinstall，避免 prisma generate 在 schema 尚未复制时执行
+RUN pnpm install --ignore-scripts --registry=https://registry.npmmirror.com
 COPY backend/ ./
 RUN pnpm exec prisma generate && pnpm build
 
