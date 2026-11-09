@@ -88,7 +88,7 @@ describe('OnePerson_LA API', () => {
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.items)).toBe(true);
     const contract = res.body.items.find((item: { id: string }) => item.id === 't-contract');
-    expect(contract).toMatchObject({ name: '合同审查', parentId: null, recordCount: 0 });
+    expect(contract).toMatchObject({ name: '合同审查', recordCount: 0 });
 
     const fields = await auth(request(app).get('/api/fields?categoryId=t-contract'));
     expect(fields.status).toBe(200);
@@ -115,16 +115,13 @@ describe('OnePerson_LA API', () => {
       request(app).delete(`/api/categories/${created.body.category.id}`)
     );
     expect(removed.status).toBe(204);
-
-    const protectedDelete = await auth(request(app).delete('/api/categories/t-contract'));
-    expect(protectedDelete.status).toBe(409);
-    expect(protectedDelete.body.error.code).toBe('CATEGORY_NOT_EMPTY');
   });
 
   it('记录 CRUD、筛选与详情结构正确', async () => {
     const dueDate = toDateOnly(new Date());
     const created = await auth(request(app).post('/api/records')).send({
-      categoryId: 't-sales',
+      categoryId: 't-contract',
+      subType: '非模板合同',
       name: '测试销售合同审查',
       sub: '相对方：测试客户',
       dueDate,
@@ -134,8 +131,9 @@ describe('OnePerson_LA API', () => {
     expect(created.status).toBe(201);
     const record = created.body.record;
     expect(record).toMatchObject({
-      categoryId: 't-sales',
-      categoryPath: '合同审查 / 销售合同',
+      categoryId: 't-contract',
+      categoryPath: '合同审查',
+      subType: '非模板合同',
       name: '测试销售合同审查',
       status: 'doing',
       dueDate,
@@ -150,6 +148,15 @@ describe('OnePerson_LA API', () => {
     expect(list.status).toBe(200);
     expect(list.body).toMatchObject({ total: 1, page: 1, pageSize: 20 });
     expect(list.body.items[0].id).toBe(record.id);
+
+    const filtered = await auth(
+      request(app).get('/api/records').query({ categoryId: 't-contract', subType: '非模板合同' })
+    );
+    expect(filtered.body.total).toBe(1);
+
+    const protectedDelete = await auth(request(app).delete('/api/categories/t-contract'));
+    expect(protectedDelete.status).toBe(409);
+    expect(protectedDelete.body.error.code).toBe('CATEGORY_NOT_EMPTY');
 
     const detail = await auth(request(app).get(`/api/records/${record.id}`));
     expect(detail.status).toBe(200);
@@ -177,7 +184,7 @@ describe('OnePerson_LA API', () => {
 
   it('dashboard summary 返回契约结构且统计口径正确', async () => {
     const created = await auth(request(app).post('/api/records')).send({
-      categoryId: 't-sales',
+      categoryId: 't-contract',
       name: '仪表盘测试记录',
       dueDate: toDateOnly(new Date()),
       status: 'done',

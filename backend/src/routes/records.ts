@@ -5,19 +5,20 @@ import { prisma } from '../prisma';
 import { asyncHandler } from '../utils/asyncHandler';
 import { notFound, validationError } from '../utils/errors';
 import { endOfDay, parseDateInput, startOfDay } from '../utils/date';
-import { getCategoryScope } from '../services/categoryService';
 import { serializeRecord } from '../services/serializers';
 
 export const recordsRouter = Router();
 
 const recordInclude = {
-  category: { include: { parent: true } },
+  category: true,
   kbLinks: { include: { doc: true } }
 } as const;
 
 const listSchema = z.object({
   categoryId: z.string().optional(),
   status: z.enum(['all', 'doing', 'done', 'overdue']).default('all'),
+  risk: z.enum(['all', '高', '中', '低']).default('all'),
+  subType: z.string().trim().optional(),
   q: z.string().optional(),
   from: z.string().optional(),
   to: z.string().optional(),
@@ -28,7 +29,8 @@ const listSchema = z.object({
 const recordFields = {
   name: z.string().trim().min(1, '事项名称不能为空').max(200),
   sub: z.string().optional(),
-  status: z.enum(['doing', 'done']).optional(),
+  subType: z.string().trim().max(40).optional(),
+  status: z.enum(['doing', 'done', 'overdue']).optional(),
   risk: z.string().optional(),
   hours: z.number().min(0, '工时不能为负数').optional(),
   values: z.record(z.unknown()).optional(),
@@ -79,21 +81,44 @@ recordsRouter.get(
   asyncHandler(async (req, res) => {
     const query = listSchema.parse(req.query);
     const where: Prisma.RecordWhereInput = {};
+    const and: Prisma.RecordWhereInput[] = [];
 
     if (query.categoryId) {
-      where.categoryId = { in: await getCategoryScope(query.categoryId) };
+      where.categoryId = query.categoryId;
     }
 
     if (query.status === 'overdue') {
-      where.status = { not: 'done' };
-      where.dueDate = { lt: startOfDay(new Date()) };
+      // 手动标记为逾期，或未办结且已过截止日期
+      and.push({
+        OR: [
+          { status: 'overdue' },
+          { status: { notIn: ['done', 'overdue'] }, dueDate: { lt: startOfDay(new Date()) } }
+        ]
+      });
     } else if (query.status !== 'all') {
       where.status = query.status;
     }
 
-    if (query.q && query.q.trim()) {
-      const keyword = query.q.trim();
-      where.OR = [{ name: { contains: keyword } }, { sub: { contains: keyword } }];
+    if (query.risk !== 'all') {
+      where.risk = query.risk;
+    }
+
+    if (query.subType) {
+      where.subType = query.subType;
+    }
+
+    const keyword = query.q?.trim();
+    if (keyword) {
+      // 模糊匹配：事项、相对方/背景、动态字段值、分类名称
+      and.push({
+        OR: [
+          { name: { contains: keyword } },
+          { sub: { contains: keyword } },
+          { subType: { contains: keyword } },
+          { valuesJson: { contains: keyword } },
+          { category: { name: { contains: keyword } } }
+        ]
+      });
     }
 
     if (query.from || query.to) {
@@ -102,11 +127,15 @@ recordsRouter.get(
       if (from && to && from.getTime() > to.getTime()) {
         throw validationError('起始日期不能晚于结束日期');
       }
-      where.createdAt = {
-        ...(from ? { gte: startOfDay(from) } : {}),
-        ...(to ? { lte: endOfDay(to) } : {})
-      };
+      and.push({
+        createdAt: {
+          ...(from ? { gte: startOfDay(from) } : {}),
+          ...(to ? { lte: endOfDay(to) } : {})
+        }
+      });
     }
+
+    if (and.length) where.AND = and;
 
     const [total, records] = await Promise.all([
       prisma.record.count({ where }),
@@ -140,6 +169,7 @@ recordsRouter.post(
       const record = await tx.record.create({
         data: {
           categoryId: body.categoryId,
+          subType: body.subType ?? '',
           name: body.name,
           sub: body.sub ?? '',
           status: body.status ?? 'doing',
@@ -185,6 +215,7 @@ recordsRouter.patch(
     const kbDocIds = await normalizeKbDocIds(body.kbDocIds);
     const data: Prisma.RecordUncheckedUpdateInput = {};
     if (body.categoryId !== undefined) data.categoryId = body.categoryId;
+    if (body.subType !== undefined) data.subType = body.subType;
     if (body.name !== undefined) data.name = body.name;
     if (body.sub !== undefined) data.sub = body.sub;
     if (body.status !== undefined) data.status = body.status;

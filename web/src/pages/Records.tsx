@@ -1,21 +1,30 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { App, Button, Input, Table } from 'antd'
+import { App, Button, DatePicker, Input, Select, Table } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
+import dayjs from 'dayjs'
 import { apiErrorMessage } from '../api/client'
-import { deleteRecord, listRecords } from '../api/records'
+import { deleteRecord, listRecords, updateRecord } from '../api/records'
 import { toastSuccess } from '../api/notify'
 import { useCategoriesStore } from '../store/categories'
 import { useRecordFilterStore } from '../store/filters'
-import { categoryPath } from '../utils/category'
+import { categoryName, sortedCategories } from '../utils/category'
+import { allSubTypes, subTypesOf } from '../utils/subType'
 import { formatHours } from '../utils/format'
 import { isOverdue, recordBadge } from '../utils/record'
 import PageHeader from '../components/PageHeader'
 import EmptyState from '../components/EmptyState'
 import LoadError from '../components/LoadError'
 import RecordModal from '../components/RecordModal'
-import type { KbDocRef, PageResult, RecordItem, RecordStatusFilter } from '../types'
+import type {
+  KbDocRef,
+  PageResult,
+  RecordItem,
+  RecordPayload,
+  RecordStatus,
+  RecordStatusFilter,
+} from '../types'
 
 const STATUS_FILTERS: Array<{ key: RecordStatusFilter; label: string }> = [
   { key: 'all', label: '全部' },
@@ -24,20 +33,45 @@ const STATUS_FILTERS: Array<{ key: RecordStatusFilter; label: string }> = [
   { key: 'overdue', label: '逾期' },
 ]
 
+const STATUS_EDIT_OPTIONS: Array<{ value: RecordStatus; label: string }> = [
+  { value: 'doing', label: '在办' },
+  { value: 'done', label: '办结' },
+  { value: 'overdue', label: '逾期' },
+]
+
+const RISK_EDIT_OPTIONS = ['高', '中', '低'].map((value) => ({ value, label: value }))
+
 const EMPTY_PAGE: PageResult<RecordItem> = { items: [], total: 0, page: 1, pageSize: 10 }
 
-function riskClass(risk: string): string {
-  if (risk.includes('高')) return 'tag-red'
-  if (risk.includes('中')) return 'tag-amber'
-  return 'tag-green'
+function riskTone(risk: string): 'red' | 'amber' | 'green' {
+  if (risk.includes('高')) return 'red'
+  if (risk.includes('中')) return 'amber'
+  return 'green'
 }
 
 export default function Records() {
   const { modal } = App.useApp()
   const categories = useCategoriesStore((state) => state.items)
   const loadCategories = useCategoriesStore((state) => state.load)
-  const { categoryId, status, q, page, pageSize, setCategoryId, setStatus, setQ, setPage, reset } =
-    useRecordFilterStore()
+  const {
+    categoryId,
+    status,
+    risk,
+    subType,
+    q,
+    from,
+    to,
+    page,
+    pageSize,
+    setCategoryId,
+    setStatus,
+    setRisk,
+    setSubType,
+    setQ,
+    setRange,
+    setPage,
+    reset,
+  } = useRecordFilterStore()
 
   const [searchParams, setSearchParams] = useSearchParams()
   const [searchText, setSearchText] = useState(q)
@@ -55,7 +89,11 @@ export default function Records() {
       const result = await listRecords({
         categoryId: categoryId ?? undefined,
         status,
+        risk,
+        subType: subType ?? undefined,
         q,
+        from: from ?? undefined,
+        to: to ?? undefined,
         page,
         pageSize,
       })
@@ -65,7 +103,7 @@ export default function Records() {
     } finally {
       setLoading(false)
     }
-  }, [categoryId, status, q, page, pageSize])
+  }, [categoryId, status, risk, subType, q, from, to, page, pageSize])
 
   useEffect(() => {
     void load()
@@ -144,6 +182,19 @@ export default function Records() {
     })
   }
 
+  // 表格内直接修改状态 / 风险
+  const quickPatch = async (record: RecordItem, patch: Partial<RecordPayload>) => {
+    try {
+      const updated = await updateRecord(record.id, patch)
+      setData((prev) => ({
+        ...prev,
+        items: prev.items.map((item) => (item.id === record.id ? { ...item, ...updated } : item)),
+      }))
+    } catch {
+      void load()
+    }
+  }
+
   const columns: ColumnsType<RecordItem> = useMemo(
     () => [
       {
@@ -160,24 +211,57 @@ export default function Records() {
         title: '分类',
         dataIndex: 'categoryPath',
         key: 'category',
-        render: (value: string) => <span className="table-muted">{value || '—'}</span>,
+        render: (value: string, record) => (
+          <span className="table-muted">
+            {value || '—'}
+            {record.subType ? ` · ${record.subType}` : ''}
+          </span>
+        ),
       },
       {
         title: '状态',
         key: 'status',
-        width: 80,
+        width: 104,
+        filterMultiple: false,
+        filters: STATUS_EDIT_OPTIONS.map((option) => ({ text: option.label, value: option.value })),
+        filteredValue: status === 'all' ? null : [status],
         render: (_, record) => {
           const badge = recordBadge(record.status, record.dueDate)
-          return <span className={`tag tag-${badge.tone}`}>{badge.text}</span>
+          return (
+            <Select<RecordStatus>
+              className={`cell-edit tone-${badge.tone}`}
+              size="small"
+              bordered={false}
+              value={record.status}
+              options={STATUS_EDIT_OPTIONS}
+              labelRender={() => badge.text}
+              popupMatchSelectWidth={false}
+              aria-label={`修改「${record.name}」状态`}
+              onChange={(value) => void quickPatch(record, { status: value })}
+            />
+          )
         },
       },
       {
         title: '风险',
         dataIndex: 'risk',
         key: 'risk',
-        width: 76,
-        render: (risk: string) =>
-          risk ? <span className={`tag ${riskClass(risk)}`}>{risk}</span> : <span className="table-muted">—</span>,
+        width: 96,
+        filterMultiple: false,
+        filters: RISK_EDIT_OPTIONS.map((option) => ({ text: option.label, value: option.value })),
+        filteredValue: risk === 'all' ? null : [risk],
+        render: (risk: string, record) => (
+          <Select<string>
+            className={`cell-edit tone-${riskTone(risk)}`}
+            size="small"
+            bordered={false}
+            value={risk || '中'}
+            options={RISK_EDIT_OPTIONS}
+            popupMatchSelectWidth={false}
+            aria-label={`修改「${record.name}」风险等级`}
+            onChange={(value) => void quickPatch(record, { risk: value })}
+          />
+        ),
       },
       {
         title: '截止',
@@ -228,17 +312,18 @@ export default function Records() {
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data, page],
+    [data, page, status, risk],
   )
 
-  const scope = categoryId ? categoryPath(categories, categoryId) : '全部分类'
+  const scope = categoryId ? categoryName(categories, categoryId) : '全部分类'
   const statusLabel = STATUS_FILTERS.find((item) => item.key === status)?.label ?? '全部'
+  const typeChips = categoryId ? subTypesOf(categoryName(categories, categoryId)) : allSubTypes()
 
   return (
     <main>
       <PageHeader
         title="工作记录"
-        range={`${scope} · ${statusLabel}${q ? ` · 搜索「${q}」` : ''}`}
+        range={`${scope} · ${statusLabel}${subType ? ` · ${subType}` : ''}${risk !== 'all' ? ` · 风险${risk}` : ''}${from && to ? ` · ${from}~${to}` : ''}${q ? ` · 搜索「${q}」` : ''}`}
         actions={
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
             新建记录
@@ -248,32 +333,70 @@ export default function Records() {
 
       <div className="page-content">
         <div className="toolbar">
+          <Select
+            aria-label="按分类筛选"
+            style={{ width: 148 }}
+            value={categoryId ?? 'all'}
+            options={[
+              { value: 'all', label: '全部分类' },
+              ...sortedCategories(categories).map((category) => ({
+                value: category.id,
+                label: category.name,
+              })),
+            ]}
+            onChange={(value) => setCategoryId(value === 'all' ? null : value)}
+          />
           <Input
             allowClear
             prefix={<SearchOutlined />}
-            placeholder="搜索事项名称 / 相对方 / 备注"
+            placeholder="搜索事项 / 相对方 / 字段 / 分类"
             aria-label="搜索工作记录"
             value={searchText}
-            style={{ width: 280 }}
+            style={{ width: 260 }}
             onChange={(event) => setSearchText(event.target.value)}
           />
-          <div className="chips" role="group" aria-label="状态筛选">
-            {STATUS_FILTERS.map((item) => (
+          <DatePicker.RangePicker
+            value={from && to ? [dayjs(from), dayjs(to)] : null}
+            allowClear
+            placeholder={['起始日期', '截止日期']}
+            aria-label="按创建日期区间筛选"
+            style={{ width: 248 }}
+            onChange={(range) =>
+              setRange(
+                range?.[0] ? range[0].format('YYYY-MM-DD') : null,
+                range?.[1] ? range[1].format('YYYY-MM-DD') : null,
+              )
+            }
+          />
+          {typeChips.length ? (
+            <div className="chips" role="group" aria-label="事项类型筛选">
               <button
-                key={item.key}
                 type="button"
-                className={`chip${status === item.key ? ' on' : ''}`}
-                aria-pressed={status === item.key}
-                onClick={() => setStatus(item.key)}
+                className={`chip${subType === null ? ' on' : ''}`}
+                aria-pressed={subType === null}
+                onClick={() => setSubType(null)}
               >
-                {item.label}
+                全部类型
               </button>
-            ))}
-          </div>
+              {typeChips.map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  className={`chip${subType === type ? ' on' : ''}`}
+                  aria-pressed={subType === type}
+                  onClick={() => setSubType(subType === type ? null : type)}
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <Button
             icon={<ReloadOutlined />}
             onClick={() => {
+              // 重置状态/风险/类型/日期/搜索，但保留当前选中的分类
               reset()
+              if (categoryId) setCategoryId(categoryId)
               setSearchText('')
             }}
           >
@@ -294,13 +417,23 @@ export default function Records() {
             dataSource={data.items}
             loading={loading}
             scroll={{ x: 940 }}
+            onChange={(_, tableFilters) => {
+              const nextStatus = (tableFilters.status?.[0] as RecordStatusFilter | undefined) ?? 'all'
+              if (nextStatus !== status) setStatus(nextStatus)
+              const nextRisk = (tableFilters.risk?.[0] as '高' | '中' | '低' | undefined) ?? 'all'
+              if (nextRisk !== risk) setRisk(nextRisk)
+            }}
             locale={{
               emptyText: (
                 <EmptyState
-                  title={q || status !== 'all' || categoryId ? '没有匹配的记录' : '还没有工作记录'}
+                  title={
+                    q || status !== 'all' || risk !== 'all' || subType || categoryId || from || to
+                      ? '没有匹配的记录'
+                      : '还没有工作记录'
+                  }
                   description={
-                    q || status !== 'all' || categoryId
-                      ? '试试调整关键字、状态或分类筛选'
+                    q || status !== 'all' || risk !== 'all' || subType || categoryId
+                      ? '试试调整关键字、状态、风险、类型或分类筛选'
                       : '记录每一次合同审查、诉讼、咨询与合规工作'
                   }
                   action={

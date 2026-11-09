@@ -9,7 +9,6 @@ export async function listCategories(): Promise<Category[]> {
 
 export interface CategoryInput {
   name: string
-  parentId?: string | null
   sort?: number
 }
 
@@ -25,4 +24,9 @@ export async function updateCategory(id: string, payload: Partial<CategoryInput>
 
 export async function deleteCategory(id: string): Promise<void> {
   await api.delete(`/categories/${id}`)
+}
+
+export async function reorderCategories(ids: string[]): Promise<Category[]> {
+  const { data } = await api.patch<{ items?: Category[] }>('/categories/reorder', { ids })
+  return data.items ?? []
 }

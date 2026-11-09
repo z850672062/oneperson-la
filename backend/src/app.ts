@@ -77,12 +77,25 @@ app.use('/api', notFoundHandler);
 if (!env.isTest) {
   const webDist = path.resolve(__dirname, '../../web/dist');
   if (fs.existsSync(webDist)) {
-    app.use(express.static(webDist, { index: false }));
+    app.use(
+      express.static(webDist, {
+        index: false,
+        setHeaders: (res, filePath) => {
+          // 指纹静态资源长缓存；其余文件（如 index.html）禁止缓存，避免更新后仍加载旧版本
+          if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          } else {
+            res.setHeader('Cache-Control', 'no-store');
+          }
+        }
+      })
+    );
     app.get('*', (req, res, next) => {
       if (req.path.startsWith('/api')) {
         next();
         return;
       }
+      res.setHeader('Cache-Control', 'no-store');
       res.sendFile(path.join(webDist, 'index.html'));
     });
   }

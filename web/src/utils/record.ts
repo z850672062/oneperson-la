@@ -5,7 +5,9 @@ export function isOverdue(
   record: Pick<RecordItem, 'status' | 'dueDate'>,
   today: string = dayjs().format('YYYY-MM-DD'),
 ): boolean {
-  if (record.status === 'done' || !record.dueDate) return false
+  if (record.status === 'done') return false
+  if (record.status === 'overdue') return true
+  if (!record.dueDate) return false
   return record.dueDate.slice(0, 10) < today
 }
 

@@ -11,7 +11,7 @@ import {
 } from '@ant-design/icons'
 import { useCategoriesStore } from '../store/categories'
 import { useRecordFilterStore } from '../store/filters'
-import { categoryPath, childrenOf, topCategories, totalRecordCount } from '../utils/category'
+import { sortedCategories } from '../utils/category'
 
 interface SidebarProps {
   mobileOpen: boolean
@@ -52,7 +52,7 @@ export default function Sidebar({ mobileOpen, onNavigate }: SidebarProps) {
     onNavigate()
   }
 
-  const top = topCategories(items)
+  const top = sortedCategories(items)
 
   return (
     <aside className={`app-sidebar${mobileOpen ? ' open' : ''}`} aria-label="主导航">
@@ -102,29 +102,16 @@ export default function Sidebar({ mobileOpen, onNavigate }: SidebarProps) {
             ) : null}
             {!error && !loading && !top.length ? <div className="nav-tree-note">暂无分类</div> : null}
             {top.map((category) => (
-              <div key={category.id}>
-                <button
-                  type="button"
-                  className={`tree-item${categoryId === category.id ? ' on' : ''}`}
-                  onClick={() => onCategoryClick(category.id)}
-                  title={category.name}
-                >
-                  <span className="tree-name">{category.name}</span>
-                  <span className="tree-count num">{totalRecordCount(items, category)}</span>
-                </button>
-                {childrenOf(items, category.id).map((child) => (
-                  <button
-                    type="button"
-                    key={child.id}
-                    className={`tree-item level-2${categoryId === child.id ? ' on' : ''}`}
-                    onClick={() => onCategoryClick(child.id)}
-                    title={categoryPath(items, child.id)}
-                  >
-                    <span className="tree-name">{child.name}</span>
-                    <span className="tree-count num">{Number(child.recordCount) || 0}</span>
-                  </button>
-                ))}
-              </div>
+              <button
+                type="button"
+                key={category.id}
+                className={`tree-item${categoryId === category.id ? ' on' : ''}`}
+                onClick={() => onCategoryClick(category.id)}
+                title={category.name}
+              >
+                <span className="tree-name">{category.name}</span>
+                <span className="tree-count num">{Number(category.recordCount) || 0}</span>
+              </button>
             ))}
           </div>
         ) : null}

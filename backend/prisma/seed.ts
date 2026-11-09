@@ -17,14 +17,11 @@ function dueAt(offsetDays: number): Date {
 }
 
 const categories = [
-  { id: 'cat-contract', name: '合同审查', parentId: null, sort: 0 },
-  { id: 'cat-sales', name: '销售合同', parentId: 'cat-contract', sort: 0 },
-  { id: 'cat-purchase', name: '采购合同', parentId: 'cat-contract', sort: 1 },
-  { id: 'cat-litigation', name: '诉讼仲裁', parentId: null, sort: 1 },
-  { id: 'cat-labor', name: '劳动争议', parentId: 'cat-litigation', sort: 0 },
-  { id: 'cat-arbitration', name: '商事仲裁', parentId: 'cat-litigation', sort: 1 },
-  { id: 'cat-compliance', name: '合规咨询', parentId: null, sort: 2 },
-  { id: 'cat-governance', name: '公司治理', parentId: null, sort: 3 }
+  { id: 'cat-contract', name: '合同审查', sort: 0 },
+  { id: 'cat-litigation', name: '诉讼仲裁', sort: 1 },
+  { id: 'cat-compliance', name: '合规建设', sort: 2 },
+  { id: 'cat-governance', name: '公司治理', sort: 3 },
+  { id: 'cat-ip', name: '知识产权', sort: 4 }
 ];
 
 type FieldSeed = {
@@ -65,7 +62,8 @@ const fields: FieldSeed[] = [
 const records = [
   {
     id: 'rec-1',
-    categoryId: 'cat-purchase',
+    categoryId: 'cat-contract',
+    subType: '非模板合同',
     name: '审查《供应链框架协议》修订稿',
     sub: '相对方：华东某物流集团 · 第三轮',
     status: 'done',
@@ -85,7 +83,8 @@ const records = [
   },
   {
     id: 'rec-2',
-    categoryId: 'cat-labor',
+    categoryId: 'cat-litigation',
+    subType: '劳动争议',
     name: '劳动争议仲裁庭前准备',
     sub: '沪劳人仲（2026）办字第 412 号',
     status: 'doing',
@@ -105,6 +104,7 @@ const records = [
   {
     id: 'rec-3',
     categoryId: 'cat-compliance',
+    subType: '制度建设',
     name: '数据合规自查清单更新',
     sub: '个人信息出境自评待补',
     status: 'doing',
@@ -122,6 +122,7 @@ const records = [
   {
     id: 'rec-4',
     categoryId: 'cat-governance',
+    subType: '',
     name: '子公司章程修订意见',
     sub: '监事条款与新规衔接',
     status: 'done',
@@ -138,7 +139,8 @@ const records = [
   },
   {
     id: 'rec-5',
-    categoryId: 'cat-sales',
+    categoryId: 'cat-contract',
+    subType: '非模板合同',
     name: '供应商违约函件回复',
     sub: '主张违约金并保留解除权',
     status: 'doing',
@@ -158,7 +160,8 @@ const records = [
   },
   {
     id: 'rec-6',
-    categoryId: 'cat-sales',
+    categoryId: 'cat-contract',
+    subType: '模板合同',
     name: '经销商年度协议模板更新',
     sub: '返利条款待与销售确认',
     status: 'doing',
@@ -178,7 +181,8 @@ const records = [
   },
   {
     id: 'rec-7',
-    categoryId: 'cat-arbitration',
+    categoryId: 'cat-litigation',
+    subType: '商事仲裁',
     name: '股权回购仲裁答辩要旨',
     sub: '回购条件是否成就',
     status: 'doing',
@@ -197,7 +201,8 @@ const records = [
   },
   {
     id: 'rec-8',
-    categoryId: 'cat-purchase',
+    categoryId: 'cat-contract',
+    subType: '非模板合同',
     name: '物流服务合同续签谈判',
     sub: '价格调整机制博弈',
     status: 'done',
@@ -218,6 +223,7 @@ const records = [
   {
     id: 'rec-9',
     categoryId: 'cat-compliance',
+    subType: '法律咨询',
     name: '经销商合规培训讲稿',
     sub: '反商业贿赂要点',
     status: 'done',
@@ -269,10 +275,10 @@ async function main() {
   const passwordHash = await bcrypt.hash('Legal1234', 10);
   const user = await prisma.user.upsert({
     where: { email: 'demo@legal.local' },
-    update: { username: 'OliveShen', name: '沈律师', passwordHash },
+    update: { username: '大力出奇迹', name: '沈律师', passwordHash },
     create: {
       id: 'user-demo',
-      username: 'OliveShen',
+      username: '大力出奇迹',
       name: '沈律师',
       email: 'demo@legal.local',
       passwordHash
@@ -282,7 +288,7 @@ async function main() {
   for (const category of categories) {
     await prisma.category.upsert({
       where: { id: category.id },
-      update: { name: category.name, parentId: category.parentId, sort: category.sort },
+      update: { name: category.name, sort: category.sort },
       create: category
     });
   }
@@ -372,6 +378,7 @@ async function main() {
   for (const record of records) {
     const data = {
       categoryId: record.categoryId,
+      subType: record.subType,
       name: record.name,
       sub: record.sub,
       status: record.status,

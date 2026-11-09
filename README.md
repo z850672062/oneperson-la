@@ -66,7 +66,7 @@ pnpm build
 pnpm start          # http://localhost:3001
 ```
 
-演示账号：`OliveShen` / `Legal1234`
+演示账号：`大力出奇迹` / `Legal1234`
 
 > 本地无 MySQL 时，`pnpm --dir backend db:up` 会用已安装的 MySQL 8 在端口 3307 启动独立实例（不影响系统服务）；`db:down` 停止，`db:status` 查看状态。Linux 请使用 Docker 或系统 MySQL。
 

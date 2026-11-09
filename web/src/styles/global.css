@@ -420,6 +420,52 @@ a {
   color: var(--gold-deep);
 }
 
+/* 表格内可直接编辑的状态 / 风险 */
+.cell-edit {
+  min-width: 72px;
+}
+
+.cell-edit .ant-select-selector {
+  padding: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  height: auto !important;
+}
+
+.cell-edit .ant-select-selection-item {
+  padding: 1px 8px;
+  border-radius: 3px;
+  font-size: 12px;
+  line-height: 1.8;
+  margin-inline-end: 0;
+  transition: background 0.15s ease;
+}
+
+.cell-edit .ant-select-arrow {
+  opacity: 0.35;
+  inset-inline-end: 0;
+}
+
+.cell-edit:hover .ant-select-arrow,
+.cell-edit.ant-select-focused .ant-select-arrow {
+  opacity: 0.85;
+}
+
+.cell-edit.tone-green .ant-select-selection-item {
+  background: #e7f0ea;
+  color: var(--green);
+}
+
+.cell-edit.tone-amber .ant-select-selection-item {
+  background: #f4ecd9;
+  color: var(--amber);
+}
+
+.cell-edit.tone-red .ant-select-selection-item {
+  background: #f5e6e4;
+  color: var(--red);
+}
+
 /* ---------- 工具栏 / 搜索 ---------- */
 .toolbar {
   display: flex;
@@ -753,6 +799,24 @@ a {
   font-size: 11px;
   opacity: 0.75;
   white-space: nowrap;
+}
+
+.list-item-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.list-item-right .ant-btn {
+  color: var(--muted-2);
+}
+
+.list-item.on .list-item-right .ant-btn {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.list-item.on .list-item-right .ant-btn:disabled {
+  color: rgba(255, 255, 255, 0.35);
 }
 
 /* ---------- 知识接入 ---------- */

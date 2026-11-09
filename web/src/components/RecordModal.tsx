@@ -19,7 +19,8 @@ import { searchKb } from '../api/kb'
 import { apiErrorMessage } from '../api/client'
 import { toastError, toastSuccess } from '../api/notify'
 import { useCategoriesStore } from '../store/categories'
-import { childrenOf, categoryPath, topCategories } from '../utils/category'
+import { sortedCategories } from '../utils/category'
+import { subTypesOf } from '../utils/subType'
 import { ensureOptions, fieldTypeName } from '../utils/field'
 import type {
   FieldDef,
@@ -48,23 +49,8 @@ const RISK_OPTIONS = ['高', '中', '低'].map((value) => ({ value, label: value
 const STATUS_OPTIONS = [
   { value: 'doing', label: '在办' },
   { value: 'done', label: '办结' },
+  { value: 'overdue', label: '逾期' },
 ]
-
-function resolveSelection(
-  categoryId: string | null | undefined,
-  categories: ReturnType<typeof useCategoriesStore.getState>['items'],
-): { topId: string; leafId: string } {
-  const tops = topCategories(categories)
-  const target = categoryId ? categories.find((item) => item.id === categoryId) : undefined
-  if (target) {
-    if (target.parentId) return { topId: target.parentId, leafId: target.id }
-    const children = childrenOf(categories, target.id)
-    return { topId: target.id, leafId: children[0]?.id ?? target.id }
-  }
-  const first = tops[0]
-  if (!first) return { topId: '', leafId: '' }
-  return { topId: first.id, leafId: childrenOf(categories, first.id)[0]?.id ?? first.id }
-}
 
 function isEmptyValue(value: unknown): boolean {
   if (value == null) return true
@@ -85,8 +71,8 @@ export default function RecordModal({
   const categories = useCategoriesStore((state) => state.items)
   const loadCategories = useCategoriesStore((state) => state.load)
 
-  const [topId, setTopId] = useState('')
-  const [leafId, setLeafId] = useState('')
+  const [categoryId, setCategoryId] = useState('')
+  const [subType, setSubType] = useState('')
   const [fields, setFields] = useState<FieldDef[]>([])
   const [fieldsLoading, setFieldsLoading] = useState(false)
   const [fieldsError, setFieldsError] = useState<string | null>(null)
@@ -120,10 +106,11 @@ export default function RecordModal({
   useEffect(() => {
     if (!open || !pendingInit.current || !categories.length) return
     pendingInit.current = false
-    const selection = resolveSelection(record?.categoryId ?? initialCategoryId, categories)
-    const nextLeaf = record?.categoryId ?? selection.leafId
-    setTopId(selection.topId)
-    setLeafId(nextLeaf)
+    const target = record?.categoryId
+      ? categories.find((item) => item.id === record.categoryId)
+      : undefined
+    setCategoryId(target?.id ?? initialCategoryId ?? sortedCategories(categories)[0]?.id ?? '')
+    setSubType(record?.subType ?? '')
     setValues(record?.values ? { ...record.values } : {})
     setName(record?.name ?? '')
     setSub(record?.sub ?? '')
@@ -140,16 +127,13 @@ export default function RecordModal({
   }, [open, categories, record, initialCategoryId, initialKbDocs])
 
   useEffect(() => {
-    if (!open || !leafId) return
+    if (!open || !categoryId) return
     let cancelled = false
     setFieldsLoading(true)
     setFieldsError(null)
     const load = async () => {
       try {
-        let items = await listFields(leafId)
-        if (!items.length && topId && topId !== leafId) {
-          items = await listFields(topId)
-        }
+        const items = await listFields(categoryId)
         if (!cancelled) setFields(items.filter((field) => !field.isCommon))
       } catch (error) {
         if (!cancelled) setFieldsError(apiErrorMessage(error))
@@ -161,10 +145,9 @@ export default function RecordModal({
     return () => {
       cancelled = true
     }
-  }, [open, leafId, topId])
+  }, [open, categoryId])
 
-  const tops = topCategories(categories)
-  const leaves = topId ? childrenOf(categories, topId) : []
+  const tops = sortedCategories(categories)
 
   const groups = useMemo(() => {
     const map = new Map<string, FieldDef[]>()
@@ -187,10 +170,10 @@ export default function RecordModal({
     })
   }
 
-  const onTopChange = (nextTop: string) => {
-    const children = childrenOf(categories, nextTop)
-    setTopId(nextTop)
-    setLeafId(children[0]?.id ?? nextTop)
+  const onCategoryChange = (nextId: string) => {
+    setCategoryId(nextId)
+    const nextName = categories.find((item) => item.id === nextId)?.name ?? ''
+    if (!subTypesOf(nextName).includes(subType)) setSubType('')
     setErrors({})
   }
 
@@ -244,13 +227,14 @@ export default function RecordModal({
       toastError('请先补全必填项')
       return
     }
-    if (!leafId) {
+    if (!categoryId) {
       toastError('请选择工作分类')
       return
     }
 
     const payload: RecordPayload = {
-      categoryId: leafId,
+      categoryId,
+      subType: subType.trim(),
       name: name.trim(),
       sub: sub.trim(),
       status,
@@ -378,7 +362,9 @@ export default function RecordModal({
     }
   }
 
-  const selectedPath = leafId ? categoryPath(categories, leafId) : ''
+  const selectedCategory = categories.find((item) => item.id === categoryId)
+  const selectedPath = selectedCategory?.name ?? ''
+  const subTypeOptions = subTypesOf(selectedCategory?.name).map((value) => ({ value, label: value }))
 
   return (
     <>
@@ -411,7 +397,7 @@ export default function RecordModal({
             type="warning"
             showIcon
             message="暂无可用分类"
-            description="请先在「字段管理」中创建一级 / 二级分类模板，再录入工作记录。"
+            description="请先在「字段管理」中创建分类模板，再录入工作记录。"
             action={
               <Button
                 size="small"
@@ -430,35 +416,36 @@ export default function RecordModal({
           <div className="record-group-title">基础信息</div>
           <div className="record-grid">
             <div className="record-field">
-              <label htmlFor="rec-category-top">
+              <label htmlFor="rec-category">
                 <span className="req">*</span>
                 <b>工作分类</b>
               </label>
               <Select
-                id="rec-category-top"
+                id="rec-category"
                 style={{ width: '100%' }}
-                value={topId || undefined}
+                value={categoryId || undefined}
                 options={tops.map((category) => ({ value: category.id, label: category.name }))}
-                onChange={onTopChange}
-                placeholder="选择一级分类"
+                onChange={onCategoryChange}
+                placeholder="选择分类"
               />
-              {leaves.length ? (
-                <Select
-                  id="rec-category-leaf"
-                  style={{ width: '100%', marginTop: 8 }}
-                  value={leafId || undefined}
-                  options={[
-                    { value: topId, label: '（整个一级分类）' },
-                    ...leaves.map((category) => ({ value: category.id, label: category.name })),
-                  ]}
-                  onChange={(next) => {
-                    setLeafId(next)
-                    setErrors({})
-                  }}
-                  placeholder="选择二级分类"
-                />
-              ) : null}
               <div className="field-hint">当前分类：{selectedPath || '—'}</div>
+            </div>
+
+            <div className="record-field">
+              <label htmlFor="rec-subtype">
+                <b>事项类型</b>
+              </label>
+              <Select
+                id="rec-subtype"
+                allowClear
+                style={{ width: '100%' }}
+                value={subType || undefined}
+                options={subTypeOptions}
+                placeholder={subTypeOptions.length ? '选择事项类型' : '该分类暂未配置类型'}
+                disabled={!subTypeOptions.length}
+                onChange={(value) => setSubType(value ?? '')}
+              />
+              <div className="field-hint">用于列表筛选，如商标注册、模板合同</div>
             </div>
 
             <div className="record-field">

@@ -19,7 +19,7 @@ export async function generateReportMarkdown(type: ReportType, range: DateRange)
     buildDashboardSummary(range),
     prisma.record.findMany({
       where: { createdAt: { gte: range.from, lte: range.to } },
-      include: { category: { include: { parent: true } } },
+      include: { category: true },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
     })
   ]);
@@ -31,7 +31,7 @@ export async function generateReportMarkdown(type: ReportType, range: DateRange)
 
   const hoursByTop = new Map<string, number>();
   for (const record of records) {
-    const top = record.category.parent ?? record.category;
+    const top = record.category;
     hoursByTop.set(top.id, (hoursByTop.get(top.id) || 0) + record.hours);
   }
 
@@ -67,11 +67,9 @@ export async function generateReportMarkdown(type: ReportType, range: DateRange)
     lines.push('| 事项 | 分类 | 状态 | 风险 | 截止日期 | 工时 |');
     lines.push('| --- | --- | --- | --- | --- | --- |');
     for (const record of records) {
-      const path = record.category.parent
-        ? `${record.category.parent.name} / ${record.category.name}`
-        : record.category.name;
+      const path = record.category.name;
       lines.push(
-        `| ${mdCell(record.name)} | ${mdCell(path)} | ${record.status === 'done' ? '办结' : '在办'} | ${mdCell(record.risk)} | ${record.dueDate ? toDateOnly(record.dueDate) : '—'} | ${record.hours} |`
+        `| ${mdCell(record.name)} | ${mdCell(path)} | ${record.status === 'done' ? '办结' : record.status === 'overdue' ? '逾期' : '在办'} | ${mdCell(record.risk)} | ${record.dueDate ? toDateOnly(record.dueDate) : '—'} | ${record.hours} |`
       );
     }
     lines.push('');
@@ -79,7 +77,11 @@ export async function generateReportMarkdown(type: ReportType, range: DateRange)
 
   lines.push('## 四、风险与提醒', '');
   const overdue = records
-    .filter((record) => record.status !== 'done' && record.dueDate && record.dueDate.getTime() < today.getTime())
+    .filter(
+      (record) =>
+        record.status === 'overdue' ||
+        (record.status !== 'done' && record.dueDate && record.dueDate.getTime() < today.getTime())
+    )
     .sort((a, b) => (a.dueDate?.getTime() || 0) - (b.dueDate?.getTime() || 0));
   const dueSoon = records.filter(
     (record) =>

@@ -7,7 +7,7 @@ export type FieldType =
   | 'multi'
   | 'file'
 
-export type RecordStatus = 'doing' | 'done'
+export type RecordStatus = 'doing' | 'done' | 'overdue'
 export type RecordStatusFilter = 'all' | RecordStatus | 'overdue'
 
 export interface User {
@@ -21,7 +21,6 @@ export interface User {
 export interface Category {
   id: string
   name: string
-  parentId: string | null
   sort: number
   recordCount: number
 }
@@ -48,6 +47,7 @@ export interface RecordItem {
   id: string
   categoryId: string
   categoryPath: string
+  subType: string
   name: string
   sub: string
   status: RecordStatus
@@ -63,6 +63,7 @@ export interface RecordItem {
 
 export interface RecordPayload {
   categoryId: string
+  subType: string
   name: string
   sub: string
   status: RecordStatus

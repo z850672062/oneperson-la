@@ -17,8 +17,7 @@ beforeAll(async () => {
   await prisma.memoryItem.deleteMany();
   await prisma.kbDoc.deleteMany();
   await prisma.kbConnector.deleteMany();
-  await prisma.category.deleteMany({ where: { parentId: { not: null } } });
-  await prisma.category.deleteMany({ where: { parentId: null } });
+  await prisma.category.deleteMany();
   await prisma.refreshSession.deleteMany();
   await prisma.consent.deleteMany();
   await prisma.user.deleteMany();
@@ -38,10 +37,8 @@ beforeAll(async () => {
 
   await prisma.category.createMany({
     data: [
-      { id: 't-contract', name: '合同审查', parentId: null, sort: 0 },
-      { id: 't-sales', name: '销售合同', parentId: 't-contract', sort: 0 },
-      { id: 't-purchase', name: '采购合同', parentId: 't-contract', sort: 1 },
-      { id: 't-compliance', name: '合规咨询', parentId: null, sort: 1 }
+      { id: 't-contract', name: '合同审查', sort: 0 },
+      { id: 't-compliance', name: '合规建设', sort: 1 }
     ]
   });
 

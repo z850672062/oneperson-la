@@ -67,7 +67,7 @@ paths:
               type: object
               required: [username, password]
               properties:
-                username: { type: string, example: OliveShen, description: 用户名或邮箱 }
+                username: { type: string, example: 大力出奇迹, description: 用户名或邮箱 }
                 password: { type: string, format: password, example: Legal1234 }
       responses:
         '200':
@@ -175,7 +175,7 @@ paths:
     get:
       tags: [Categories]
       summary: 分类扁平列表（含记录数）
-      description: 固定两级。recordCount 对一级分类统计其自身及直属二级分类下所有记录。
+      description: 一级分类扁平列表。recordCount 为该分类下的记录数。
       responses:
         '200':
           description: OK
@@ -192,7 +192,7 @@ paths:
     post:
       tags: [Categories]
       summary: 新建分类
-      description: parentId 省略或为 null 时创建一级分类；parentId 必须是已存在的一级分类（最多两级）。
+      description: 仅一级分类（原两级结构已扁平化），分类名全局唯一。
       requestBody:
         required: true
         content:
@@ -202,7 +202,6 @@ paths:
               required: [name]
               properties:
                 name: { type: string, minLength: 1, maxLength: 40 }
-                parentId: { type: string, nullable: true }
       responses:
         '201':
           description: 已创建
@@ -215,6 +214,38 @@ paths:
                   category: { $ref: '#/components/schemas/Category' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/categories/reorder:
+    patch:
+      tags: [Categories]
+      summary: 批量保存分类排序
+      description: 传入全部分类 ID 的目标顺序，按数组下标写入 sort；工作记录的分类下拉与侧边栏按该顺序展示。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  items: { type: string }
+      responses:
+        '200':
+          description: 已保存
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Category' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '422': { $ref: '#/components/responses/ValidationError' }
 
   /api/categories/{id}:
@@ -249,7 +280,7 @@ paths:
     delete:
       tags: [Categories]
       summary: 删除分类
-      description: 存在子分类或记录时拒绝删除，返回 409 `CATEGORY_NOT_EMPTY`；无引用时级联删除其字段模板。
+      description: 存在记录时拒绝删除，返回 409 `CATEGORY_NOT_EMPTY`；无引用时级联删除其字段模板。
       responses:
         '204': { description: 已删除 }
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -376,7 +407,9 @@ paths:
         - name: status
           in: query
           schema: { type: string, enum: [all, doing, done, overdue], default: all }
-        - { name: q, in: query, schema: { type: string } }
+        - { name: q, in: query, description: 模糊匹配事项、相对方/背景、事项类型、动态字段值与分类名称, schema: { type: string } }
+        - { name: risk, in: query, schema: { type: string, enum: [all, 高, 中, 低], default: all } }
+        - { name: subType, in: query, description: 按事项类型精确筛选，如 商标注册、模板合同, schema: { type: string } }
         - { name: from, in: query, schema: { type: string, format: date } }
         - { name: to, in: query, schema: { type: string, format: date } }
         - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
@@ -1080,12 +1113,12 @@ components:
           example:
             error: { code: CONFLICT, message: 同名资源已存在 }
     CategoryNotEmpty:
-      description: 分类非空（有子分类或记录）
+      description: 分类非空（存在记录）
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
           example:
-            error: { code: CATEGORY_NOT_EMPTY, message: 该分类下存在子分类或记录，无法删除 }
+            error: { code: CATEGORY_NOT_EMPTY, message: 该分类下存在记录，无法删除 }
     ValidationError:
       description: 参数校验失败
       content:
@@ -1120,7 +1153,7 @@ components:
       required: [id, username, name, email]
       properties:
         id: { type: string }
-        username: { type: string, example: OliveShen }
+        username: { type: string, example: 大力出奇迹 }
         name: { type: string }
         email: { type: string, format: email }
 
@@ -1133,11 +1166,10 @@ components:
 
     Category:
       type: object
-      required: [id, name, parentId, sort, recordCount]
+      required: [id, name, sort, recordCount]
       properties:
         id: { type: string }
         name: { type: string }
-        parentId: { type: string, nullable: true }
         sort: { type: integer }
         recordCount: { type: integer }
 
@@ -1167,14 +1199,15 @@ components:
 
     Record:
       type: object
-      required: [id, categoryId, categoryPath, name, sub, status, risk, dueDate, hours, values, kbDocIds, kbDocs, createdAt, updatedAt]
+      required: [id, categoryId, categoryPath, subType, name, sub, status, risk, dueDate, hours, values, kbDocIds, kbDocs, createdAt, updatedAt]
       properties:
         id: { type: string }
         categoryId: { type: string }
-        categoryPath: { type: string, example: 合同审查 / 销售合同 }
+        categoryPath: { type: string, example: 合同审查 }
+        subType: { type: string, description: 事项类型，如 商标注册、模板合同, example: 模板合同 }
         name: { type: string }
         sub: { type: string }
-        status: { type: string, enum: [doing, done] }
+        status: { type: string, enum: [doing, done, overdue] }
         risk: { type: string, example: 中 }
         dueDate: { type: string, format: date, nullable: true }
         hours: { type: number }
@@ -1201,9 +1234,10 @@ components:
       required: [categoryId, name, dueDate]
       properties:
         categoryId: { type: string }
+        subType: { type: string, maxLength: 40, description: 事项类型，如 商标注册、模板合同 }
         name: { type: string, minLength: 1, maxLength: 200 }
         sub: { type: string }
-        status: { type: string, enum: [doing, done] }
+        status: { type: string, enum: [doing, done, overdue] }
         risk: { type: string }
         dueDate: { type: string, format: date }
         hours: { type: number, minimum: 0 }
@@ -1218,9 +1252,10 @@ components:
       type: object
       properties:
         categoryId: { type: string }
+        subType: { type: string, maxLength: 40 }
         name: { type: string, minLength: 1, maxLength: 200 }
         sub: { type: string }
-        status: { type: string, enum: [doing, done] }
+        status: { type: string, enum: [doing, done, overdue] }
         risk: { type: string }
         dueDate: { type: string, format: date }
         hours: { type: number, minimum: 0 }

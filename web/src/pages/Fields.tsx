@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { App, Button, Table } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { PlusOutlined, SettingOutlined } from '@ant-design/icons'
+import { ArrowDownOutlined, ArrowUpOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons'
 import { apiErrorMessage } from '../api/client'
+import { reorderCategories } from '../api/categories'
 import { deleteField, listFields } from '../api/fields'
 import { toastSuccess } from '../api/notify'
 import { useCategoriesStore } from '../store/categories'
-import { categoryPath, childrenOf, topCategories, totalRecordCount } from '../utils/category'
+import { sortedCategories } from '../utils/category'
 import { fieldTypeName } from '../utils/field'
 import PageHeader from '../components/PageHeader'
 import EmptyState from '../components/EmptyState'
@@ -57,6 +58,7 @@ export default function Fields() {
   const [fieldModalOpen, setFieldModalOpen] = useState(false)
   const [editingField, setEditingField] = useState<FieldDef | null>(null)
   const [categoryModalOpen, setCategoryModalOpen] = useState(false)
+  const [sorting, setSorting] = useState(false)
 
   useEffect(() => {
     void load()
@@ -68,7 +70,7 @@ export default function Fields() {
       return
     }
     if (selectedId && items.some((item) => item.id === selectedId)) return
-    const first = topCategories(items)[0]
+    const first = sortedCategories(items)[0]
     setSelectedId(first?.id ?? items[0].id)
   }, [items, selectedId])
 
@@ -96,7 +98,25 @@ export default function Fields() {
   const groups = useMemo(() => Array.from(new Set(fields.map((field) => field.group))), [fields])
 
   const selectedCategory = items.find((item) => item.id === selectedId)
-  const selectedPath = selectedCategory ? categoryPath(items, selectedCategory.id) : ''
+  const selectedPath = selectedCategory?.name ?? ''
+
+  // 分类排序：保存后同步到工作记录的分类下拉
+  const moveCategory = async (index: number, direction: -1 | 1) => {
+    const ordered = sortedCategories(items)
+    const target = index + direction
+    if (sorting || target < 0 || target >= ordered.length) return
+    const ids = ordered.map((item) => item.id)
+    ;[ids[index], ids[target]] = [ids[target], ids[index]]
+    setSorting(true)
+    try {
+      await reorderCategories(ids)
+      await load(true)
+    } catch {
+      /* 统一错误提示 */
+    } finally {
+      setSorting(false)
+    }
+  }
 
   const rows: FieldRow[] = useMemo(
     () => [
@@ -204,7 +224,7 @@ export default function Fields() {
     },
   ]
 
-  const tops = topCategories(items)
+  const tops = sortedCategories(items)
 
   return (
     <main>
@@ -251,27 +271,48 @@ export default function Fields() {
               </div>
             ) : null}
 
-            {tops.map((top) => (
-              <div key={top.id}>
-                <button
-                  type="button"
-                  className={`list-item${selectedId === top.id ? ' on' : ''}`}
-                  onClick={() => setSelectedId(top.id)}
-                >
-                  <span>{top.name}</span>
-                  <span className="list-count num">{totalRecordCount(items, top)} 条</span>
-                </button>
-                {childrenOf(items, top.id).map((child) => (
-                  <button
-                    type="button"
-                    key={child.id}
-                    className={`list-item level-2${selectedId === child.id ? ' on' : ''}`}
-                    onClick={() => setSelectedId(child.id)}
-                  >
-                    <span>{child.name}</span>
-                    <span className="list-count num">{Number(child.recordCount) || 0} 条</span>
-                  </button>
-                ))}
+            {tops.map((top, index) => (
+              <div
+                key={top.id}
+                role="button"
+                tabIndex={0}
+                className={`list-item${selectedId === top.id ? ' on' : ''}`}
+                onClick={() => setSelectedId(top.id)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    setSelectedId(top.id)
+                  }
+                }}
+              >
+                <span>{top.name}</span>
+                <span className="list-item-right">
+                  <span className="list-count num">{Number(top.recordCount) || 0} 条</span>
+                  <Button
+                    size="small"
+                    type="text"
+                    aria-label={`上移分类 ${top.name}`}
+                    title="上移"
+                    icon={<ArrowUpOutlined />}
+                    disabled={sorting || index === 0}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      void moveCategory(index, -1)
+                    }}
+                  />
+                  <Button
+                    size="small"
+                    type="text"
+                    aria-label={`下移分类 ${top.name}`}
+                    title="下移"
+                    icon={<ArrowDownOutlined />}
+                    disabled={sorting || index === tops.length - 1}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      void moveCategory(index, 1)
+                    }}
+                  />
+                </span>
               </div>
             ))}
 

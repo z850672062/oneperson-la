@@ -26,7 +26,7 @@
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
 | id | TEXT | PK, cuid | 用户 ID |
-| username | TEXT | UNIQUE, NOT NULL | 登录名（种子为 `OliveShen`） |
+| username | TEXT | UNIQUE, NOT NULL | 登录名（种子为 `大力出奇迹`） |
 | name | TEXT | NOT NULL | 显示名 |
 | email | TEXT | UNIQUE, NOT NULL | 邮箱，也可作为登录名 |
 | passwordHash | TEXT | NOT NULL | bcrypt(10) 哈希，绝不返回/记录 |
@@ -48,21 +48,18 @@
 
 索引：`(userId)`；`tokenHash` 唯一。刷新时轮换：旧记录写 `revokedAt`，新建一条。
 
-### 1.3 Category（两级分类）
+### 1.3 Category（一级分类）
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
-| id | TEXT | PK | |
-| name | TEXT | NOT NULL | |
-| parentId | TEXT | NULL, FK → Category.id, ON DELETE RESTRICT | NULL=一级；非 NULL=二级 |
+| id | VARCHAR(191) | PK | |
+| name | VARCHAR(191) | NOT NULL, UNIQUE | 分类名全局唯一 |
 | sort | INTEGER | default 0 | 升序 |
 | createdAt / updatedAt | DATETIME | | |
 
 约束与索引：
-- `UNIQUE(parentId, name)`：同一父级下不重名（SQLite 中 NULL 不参与唯一比较，一级分类重名由服务层另行检查）。
-  > 服务层在创建/改名时显式检查同名，覆盖一级分类（parentId 为 NULL）场景。
-- 索引 `(parentId)`。
-- 固定两级：创建二级分类时校验父分类必须是一级。
+- `UNIQUE(name)`：分类名全局唯一，服务层在创建/改名时返回 409 `CATEGORY_CONFLICT`。
+- 原两级结构已扁平化：二级分类名称迁移为 `Record.subType`（事项类型），侧边栏与分类管理均只展示一级分类。
 
 ### 1.4 FieldDef（字段模板）
 
@@ -92,7 +89,8 @@
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
 | id | TEXT | PK | |
-| categoryId | TEXT | FK → Category.id, ON DELETE RESTRICT | 叶子分类（一级分类无子级时也可直接使用） |
+| categoryId | VARCHAR(191) | FK → Category.id, ON DELETE RESTRICT | 一级分类 |
+| subType | VARCHAR(40) | default "" | 事项类型（如商标注册、模板合同），用于列表筛选 |
 | name | TEXT | NOT NULL | 事项名称 |
 | sub | VARCHAR(512) | default "" | 副标题（相对方/案号/背景） |
 | status | VARCHAR(191) | default "doing" | doing / done |
@@ -236,7 +234,6 @@ ChatMessage：
 ```
 User 1─n RefreshSession
 User 1─n Consent
-Category 1─n Category (自关联，最多两级)
 Category 1─n FieldDef        (级联删除)
 Category 1─n Record          (删除受保护：RESTRICT)
 Record n─n KbDoc             (通过 RecordKb，级联删除)
@@ -246,7 +243,8 @@ ChatSession 1─n ChatMessage  (级联删除)
 
 ## 3. 关键业务口径
 
-- **分类 recordCount**：一级分类 = 自身 + 直属二级分类的记录数；二级分类 = 自身记录数。
+- **分类 recordCount**：分类自身的记录数（两级结构已扁平化）。
+- **事项类型筛选**：`GET /api/records?subType=商标注册` 精确匹配 `Record.subType`；类型选项按一级分类配置。
 - **仪表盘汇总**：记录 `createdAt ∈ [from 00:00, to 23:59:59.999]`（服务端本地时区）。
 - **逾期**：`status != 'done' && dueDate < 今天零点`。
 - **状态分布**（仅未办结、互斥）：`overdue` 优先；否则 `sub` 命中 `/反馈|谈判|待/` 为 `waiting`；其余 `running`。

@@ -23,7 +23,6 @@ export function serializeCategory(category: Category, recordCount: number) {
   return {
     id: category.id,
     name: category.name,
-    parentId: category.parentId,
     sort: category.sort,
     recordCount
   };
@@ -55,7 +54,7 @@ export function serializeField(field: FieldDef) {
 }
 
 type RecordWithRelations = RecordModel & {
-  category: Category & { parent: Category | null };
+  category: Category;
   kbLinks: Array<RecordKb & { doc: KbDoc }>;
 };
 
@@ -72,14 +71,13 @@ export function parseValues(valuesJson: string): Record<string, unknown> {
 }
 
 export function serializeRecord(record: RecordWithRelations) {
-  const categoryPath = record.category.parent
-    ? `${record.category.parent.name} / ${record.category.name}`
-    : record.category.name;
+  const categoryPath = record.category.name;
   const kbDocs = record.kbLinks.map((link) => ({ id: link.doc.id, title: link.doc.title }));
   return {
     id: record.id,
     categoryId: record.categoryId,
     categoryPath,
+    subType: record.subType,
     name: record.name,
     sub: record.sub,
     status: record.status,

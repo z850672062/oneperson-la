@@ -36,21 +36,15 @@ model RefreshSession {
   @@index([userId])
 }
 
-// 固定两级分类：parentId 为空是一级，否则是二级
+// 一级分类（原两级结构已扁平化，分类名全局唯一）
 model Category {
   id        String      @id @default(cuid())
-  name      String
-  parentId  String?
+  name      String      @unique
   sort      Int         @default(0)
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
-  parent    Category?   @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
-  children  Category[]  @relation("CategoryTree")
   fields    FieldDef[]
   records   Record[]
-
-  @@unique([parentId, name])
-  @@index([parentId])
 }
 
 // 字段模板；公共字段 status/dueDate 不入库，由接口以 isCommon:true 追加
@@ -76,6 +70,7 @@ model FieldDef {
 model Record {
   id         String     @id @default(cuid())
   categoryId String
+  subType    String     @default("") @db.VarChar(40)
   name       String
   sub        String     @default("") @db.VarChar(512)
   status     String     @default("doing")
@@ -89,6 +84,7 @@ model Record {
   kbLinks    RecordKb[]
 
   @@index([categoryId])
+  @@index([categoryId, subType])
   @@index([status])
   @@index([dueDate])
   @@index([createdAt])

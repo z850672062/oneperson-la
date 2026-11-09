@@ -5,6 +5,8 @@ import type { PageResult, RecordPayload, RecordStatusFilter, RecordItem } from '
 export interface RecordQuery {
   categoryId?: string
   status?: RecordStatusFilter
+  risk?: string
+  subType?: string
   q?: string
   from?: string
   to?: string
@@ -17,6 +19,8 @@ export async function listRecords(query: RecordQuery): Promise<PageResult<Record
     params: {
       categoryId: query.categoryId || undefined,
       status: query.status && query.status !== 'all' ? query.status : undefined,
+      risk: query.risk && query.risk !== 'all' ? query.risk : undefined,
+      subType: query.subType || undefined,
       q: query.q || undefined,
       from: query.from || undefined,
       to: query.to || undefined,
@@ -38,7 +42,10 @@ export async function createRecord(payload: RecordPayload): Promise<RecordItem> 
   return data.record ?? data
 }
 
-export async function updateRecord(id: string, payload: RecordPayload): Promise<RecordItem> {
+export async function updateRecord(
+  id: string,
+  payload: Partial<RecordPayload>,
+): Promise<RecordItem> {
   const { data } = await api.patch<{ record?: RecordItem } & RecordItem>(`/records/${id}`, payload)
   return data.record ?? data
 }

@@ -42,10 +42,9 @@ export async function buildDashboardSummary(range: DateRange): Promise<Dashboard
   const [records, topCategories] = await Promise.all([
     prisma.record.findMany({
       where: { createdAt: { gte: startOfDay(range.from), lte: endOfDay(range.to) } },
-      include: { category: { include: { parent: true } } }
+      include: { category: true }
     }),
     prisma.category.findMany({
-      where: { parentId: null },
       orderBy: [{ sort: 'asc' }, { createdAt: 'asc' }]
     })
   ]);
@@ -66,7 +65,10 @@ export async function buildDashboardSummary(range: DateRange): Promise<Dashboard
   for (const record of records) {
     hours += record.hours;
     const isDone = record.status === 'done';
-    const isOverdue = !isDone && Boolean(record.dueDate && record.dueDate.getTime() < todayStart.getTime());
+    const isOverdue =
+      !isDone &&
+      (record.status === 'overdue' ||
+        Boolean(record.dueDate && record.dueDate.getTime() < todayStart.getTime()));
 
     if (isDone) {
       done += 1;
@@ -79,7 +81,7 @@ export async function buildDashboardSummary(range: DateRange): Promise<Dashboard
       running += 1;
     }
 
-    const top = record.category.parent ?? record.category;
+    const top = record.category;
     if (topById.has(top.id)) {
       categoryCount.set(top.id, (categoryCount.get(top.id) || 0) + 1);
     }

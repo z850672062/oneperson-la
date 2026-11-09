@@ -27,7 +27,7 @@ userRouter.get(
       prisma.fieldDef.findMany({ orderBy: [{ categoryId: 'asc' }, { sort: 'asc' }] }),
       prisma.record.findMany({
         include: {
-          category: { include: { parent: true } },
+          category: true,
           kbLinks: { include: { doc: true } }
         },
         orderBy: [{ createdAt: 'asc' }]
@@ -68,8 +68,7 @@ userRouter.delete(
       prisma.memoryItem.deleteMany(),
       prisma.kbDoc.deleteMany(),
       prisma.kbConnector.deleteMany(),
-      prisma.category.deleteMany({ where: { parentId: { not: null } } }),
-      prisma.category.deleteMany({ where: { parentId: null } })
+      prisma.category.deleteMany()
     ]);
     res.status(204).end();
   })
