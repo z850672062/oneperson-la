@@ -3,6 +3,7 @@
 FROM node:22-bookworm-slim AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
+ENV npm_config_registry=https://registry.npmmirror.com
 RUN corepack enable
 
 # ---------- 前端 ----------

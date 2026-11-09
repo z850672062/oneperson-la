@@ -70,6 +70,22 @@ pnpm start          # http://localhost:3001
 
 > 本地无 MySQL 时，`pnpm --dir backend db:up` 会用已安装的 MySQL 8 在端口 3307 启动独立实例（不影响系统服务）；`db:down` 停止，`db:status` 查看状态。Linux 请使用 Docker 或系统 MySQL。
 
+## Linux 部署（Docker Compose）
+
+服务器只需 Docker 与 Compose v2，MySQL 与应用都跑在容器里（MySQL 不映射宿主端口，避免与已有数据库冲突；应用默认映射 `8080`）。
+
+```bash
+git clone <repo> /opt/oneperson-la && cd /opt/oneperson-la
+cp .env.prod.example .env && vim .env      # 填 DATABASE_URL / MYSQL_* / JWT_SECRET / ENCRYPTION_KEY
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+- 升级：`bash deploy.sh`（拉取代码 → 重建 → 重启 → 清理旧镜像）；容器重启策略为 `unless-stopped`，开机自启
+- 迁移：应用容器启动时自动执行 `prisma migrate deploy`
+- 备份：`docker exec oneperson-la-mysql mysqldump -ula -p"$MYSQL_PASSWORD" oneperson_la > backup.sql`
+- Obsidian：宿主目录以只读方式挂到容器 `/vault`（`.env` 的 `OBSIDIAN_VAULT`），连接器路径填 `/vault/子目录`
+- 对外访问建议用已有 nginx 反代 `127.0.0.1:8080` 并配置 HTTPS；HTTPS 下将 `COOKIE_SECURE` 置为 `true`
+
 ## 常用脚本（根目录）
 
 | 命令 | 说明 |
