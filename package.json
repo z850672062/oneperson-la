@@ -1,0 +1,19 @@
+{
+  "name": "oneperson-la",
+  "version": "0.1.0",
+  "private": true,
+  "description": "一人法务工作台（OnePerson_LA）· 单体仓库根脚本",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm --dir web dev",
+    "dev:server": "pnpm --dir backend dev",
+    "build": "pnpm --dir web build && pnpm --dir backend build",
+    "start": "pnpm --dir backend start",
+    "db:migrate": "pnpm --dir backend db:migrate",
+    "db:seed": "pnpm --dir backend db:seed",
+    "test": "pnpm --dir backend test && pnpm --dir web test",
+    "typecheck": "pnpm --dir backend typecheck && pnpm --dir web typecheck"
+  }
+}

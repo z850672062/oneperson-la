@@ -1,0 +1,212 @@
+// OnePerson_LA 数据模型
+// 数据库：MySQL 8 / InnoDB / utf8mb4。枚举值以 String 存储，并在应用层用 zod 约束。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// 账号（单人使用，保留多账号能力）
+model User {
+  id           String           @id @default(cuid())
+  username     String           @unique
+  name         String
+  email        String           @unique
+  passwordHash String
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  sessions     RefreshSession[]
+  consents     Consent[]
+}
+
+// refresh token 只存 sha256 哈希，可吊销
+model RefreshSession {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// 固定两级分类：parentId 为空是一级，否则是二级
+model Category {
+  id        String      @id @default(cuid())
+  name      String
+  parentId  String?
+  sort      Int         @default(0)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  parent    Category?   @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children  Category[]  @relation("CategoryTree")
+  fields    FieldDef[]
+  records   Record[]
+
+  @@unique([parentId, name])
+  @@index([parentId])
+}
+
+// 字段模板；公共字段 status/dueDate 不入库，由接口以 isCommon:true 追加
+model FieldDef {
+  id         String   @id @default(cuid())
+  categoryId String
+  name       String
+  group      String
+  type       String
+  required   Boolean  @default(false)
+  optionsJson String? @db.Text
+  note       String?
+  sort       Int      @default(0)
+  isCommon   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@index([categoryId])
+}
+
+// 工作记录；动态字段值以 JSON 字符串保存在 valuesJson
+model Record {
+  id         String     @id @default(cuid())
+  categoryId String
+  name       String
+  sub        String     @default("") @db.VarChar(512)
+  status     String     @default("doing")
+  risk       String     @default("中")
+  dueDate    DateTime?
+  hours      Float      @default(0)
+  valuesJson String     @db.Text
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  category   Category   @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  kbLinks    RecordKb[]
+
+  @@index([categoryId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([createdAt])
+}
+
+// 记录与知识库文档多对多
+model RecordKb {
+  id       String @id @default(cuid())
+  recordId String
+  docId    String
+  record   Record @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  doc      KbDoc  @relation(fields: [docId], references: [id], onDelete: Cascade)
+
+  @@unique([recordId, docId])
+  @@index([docId])
+}
+
+model KbConnector {
+  id            String   @id @default(cuid())
+  name          String
+  type          String
+  status        String   @default("off")
+  path          String   @default("") @db.VarChar(512)
+  meta          String   @default("") @db.VarChar(512)
+  indexedCount  Int      @default(0)
+  lastIndexedAt DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  docs          KbDoc[]
+}
+
+model KbDoc {
+  id          String       @id @default(cuid())
+  connectorId String?
+  title       String
+  path        String       @default("") @db.VarChar(512)
+  content     String       @db.MediumText
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  connector   KbConnector? @relation(fields: [connectorId], references: [id], onDelete: SetNull)
+  records     RecordKb[]
+
+  @@unique([connectorId, path])
+  @@index([title])
+}
+
+model ChatSession {
+  id        String        @id @default(cuid())
+  title     String        @default("新会话")
+  model     String
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  messages  ChatMessage[]
+}
+
+model ChatMessage {
+  id           String      @id @default(cuid())
+  sessionId    String
+  role         String
+  content      String      @db.Text
+  citationsJson String?    @db.Text
+  createdAt    DateTime    @default(now())
+  session      ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+}
+
+// 记忆画像条目；text 唯一用于去重
+model MemoryItem {
+  id        String   @id @default(cuid())
+  text      String   @unique
+  source    String   @default("chat")
+  weight    Float    @default(1)
+  createdAt DateTime @default(now())
+}
+
+model Report {
+  id        String   @id @default(cuid())
+  type      String
+  title     String
+  rangeFrom DateTime
+  rangeTo   DateTime
+  markdown  String   @db.MediumText
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// 单例设置（id 固定为 default）
+model Setting {
+  id            String   @id @default("default")
+  maskSensitive Boolean  @default(true)
+  maskLlm       Boolean  @default(true)
+  defaultModel  String   @default("deepseek-chat")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// API Key 仅以 AES-256-GCM 密文存储
+model LlmModel {
+  id         String   @id @default(cuid())
+  vendor     String
+  model      String
+  apiKeyEnc  String?
+  isDefault  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([vendor, model])
+}
+
+model Consent {
+  id         String   @id @default(cuid())
+  userId     String
+  kind       String
+  version    String
+  acceptedAt DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}

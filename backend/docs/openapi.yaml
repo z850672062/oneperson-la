@@ -1,0 +1,1377 @@
+openapi: 3.0.3
+info:
+  title: OnePerson_LA · 一人法务工作台 API
+  version: 0.1.0
+  description: |
+    单人法务工作台后端契约。所有接口前缀 `/api`，默认端口 `3001`。
+
+    - 认证：受保护接口使用 `Authorization: Bearer <accessToken>`（JWT HS256，15 分钟）。
+    - 刷新：登录成功后由服务端下发 HttpOnly Cookie `la_refresh`（SameSite=Lax、Path=/api/auth、7 天），
+      调用 `POST /api/auth/refresh` 换取新 accessToken，并轮换 refresh token。
+    - 错误：统一返回 `{ "error": { "code": "...", "message": "..." } }`。
+    - 日期：业务日期字段（dueDate / rangeFrom / rangeTo / range）统一为 `YYYY-MM-DD`；
+      `createdAt` / `updatedAt` / `lastIndexedAt` 为 ISO-8601 字符串。
+servers:
+  - url: http://localhost:3001
+    description: 本地开发
+tags:
+  - name: Auth
+  - name: Categories
+  - name: Fields
+  - name: Records
+  - name: Dashboard
+  - name: Reports
+  - name: KnowledgeBase
+  - name: Chat
+  - name: Profile
+  - name: Settings
+  - name: User
+  - name: Health
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/health:
+    get:
+      tags: [Health]
+      summary: 健康检查
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, version]
+                properties:
+                  ok: { type: boolean, example: true }
+                  version: { type: string, example: 0.1.0 }
+
+  # ------------------------------------------------------------------ Auth
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: 账号密码登录
+      security: []
+      description: |
+        成功后返回 accessToken，并通过 Set-Cookie 下发 `la_refresh`
+        （HttpOnly、SameSite=Lax、Path=/api/auth、7 天）。
+        同一 IP + 账号 15 分钟内连续失败 5 次后返回 429。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string, example: demo@legal.local, description: 用户名或邮箱 }
+                password: { type: string, format: password, example: Legal1234 }
+      responses:
+        '200':
+          description: 登录成功
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+              description: la_refresh=...; HttpOnly; SameSite=Lax; Path=/api/auth; Max-Age=604800
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/auth/logout:
+    post:
+      tags: [Auth]
+      summary: 退出登录（吊销 refresh 并清除 Cookie）
+      security:
+        - bearerAuth: []
+        - refreshCookie: []
+      responses:
+        '204': { description: 已退出 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: 刷新 accessToken（读取 refresh Cookie 并轮换）
+      security:
+        - refreshCookie: []
+      responses:
+        '200':
+          description: 刷新成功
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: 当前登录用户
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/auth/password:
+    post:
+      tags: [Auth]
+      summary: 修改密码（成功后吊销该用户全部 refresh 会话）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string, format: password }
+                newPassword: { type: string, format: password, minLength: 8 }
+      responses:
+        '204': { description: 修改成功 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  # ------------------------------------------------------------ Categories
+  /api/categories:
+    get:
+      tags: [Categories]
+      summary: 分类扁平列表（含记录数）
+      description: 固定两级。recordCount 对一级分类统计其自身及直属二级分类下所有记录。
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Category' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Categories]
+      summary: 新建分类
+      description: parentId 省略或为 null 时创建一级分类；parentId 必须是已存在的一级分类（最多两级）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 40 }
+                parentId: { type: string, nullable: true }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [category]
+                properties:
+                  category: { $ref: '#/components/schemas/Category' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/categories/{id}:
+    parameters:
+      - $ref: '#/components/parameters/PathId'
+    patch:
+      tags: [Categories]
+      summary: 更新分类名称或排序
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 1, maxLength: 40 }
+                sort: { type: integer }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [category]
+                properties:
+                  category: { $ref: '#/components/schemas/Category' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Categories]
+      summary: 删除分类
+      description: 存在子分类或记录时拒绝删除，返回 409 `CATEGORY_NOT_EMPTY`；无引用时级联删除其字段模板。
+      responses:
+        '204': { description: 已删除 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/CategoryNotEmpty' }
+
+  # ---------------------------------------------------------------- Fields
+  /api/fields:
+    get:
+      tags: [Fields]
+      summary: 字段模板列表
+      description: |
+        传 categoryId 时返回该分类的字段模板，并追加两个公共字段（`isCommon: true`）：
+        状态（id=common-status）、截止日期（id=common-dueDate）。公共字段不可删除。
+        不传 categoryId 时返回全部非公共字段。
+      parameters:
+        - name: categoryId
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/FieldDef' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Fields]
+      summary: 新建字段
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [categoryId, name, group, type, required]
+              properties:
+                categoryId: { type: string }
+                name: { type: string, minLength: 1, maxLength: 60 }
+                group: { type: string, example: 基础信息 }
+                type: { $ref: '#/components/schemas/FieldType' }
+                required: { type: boolean }
+                options:
+                  type: array
+                  nullable: true
+                  items: { type: string }
+                note: { type: string, nullable: true }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [field]
+                properties:
+                  field: { $ref: '#/components/schemas/FieldDef' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/fields/{id}:
+    parameters:
+      - $ref: '#/components/parameters/PathId'
+    patch:
+      tags: [Fields]
+      summary: 更新字段（类型不可变更）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 1, maxLength: 60 }
+                group: { type: string }
+                required: { type: boolean }
+                options:
+                  type: array
+                  nullable: true
+                  items: { type: string }
+                note: { type: string, nullable: true }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [field]
+                properties:
+                  field: { $ref: '#/components/schemas/FieldDef' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Fields]
+      summary: 删除字段（历史记录中的值保留）
+      responses:
+        '204': { description: 已删除 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # --------------------------------------------------------------- Records
+  /api/records:
+    get:
+      tags: [Records]
+      summary: 工作记录分页列表
+      description: |
+        - `categoryId` 传一级分类时自动包含其所有二级分类下的记录。
+        - `status=overdue` 表示 `status != done` 且 `dueDate < 今天`。
+        - `from` / `to` 按 `createdAt` 过滤，日期闭区间。
+        - `q` 对事项名称与副标题做不区分大小写包含匹配。
+      parameters:
+        - { name: categoryId, in: query, schema: { type: string } }
+        - name: status
+          in: query
+          schema: { type: string, enum: [all, doing, done, overdue], default: all }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecordList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    post:
+      tags: [Records]
+      summary: 新建记录
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecordInput' }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecordResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/records/{id}:
+    parameters:
+      - $ref: '#/components/parameters/PathId'
+    get:
+      tags: [Records]
+      summary: 记录详情
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecordResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Records]
+      summary: 更新记录（字段均可选）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecordPatch' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecordResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Records]
+      summary: 删除记录
+      responses:
+        '204': { description: 已删除 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ------------------------------------------------------------- Dashboard
+  /api/dashboard/summary:
+    get:
+      tags: [Dashboard]
+      summary: 工作汇总仪表盘
+      description: |
+        汇总口径：记录 `createdAt` 落入 [from, to] 区间。
+        - overdue：`status != done` 且 `dueDate < 今天`（不受区间限制的逾期判定，但对象为区间内创建的记录）。
+        - stats.doing：区间内创建、未办结且未逾期的记录数。
+        - stats.rate：办结率百分比（0–100，四舍五入取整）。
+        - statusDist 仅统计区间内未办结记录，running / waiting / overdue 互斥；
+          waiting 判定为 sub 命中 `/反馈|谈判|待/`。
+        - trend：区间 ≤ 31 天按天；> 31 天按周（周起始为周一）聚合，字段 date 为桶起始日期。
+      parameters:
+        - name: period
+          in: query
+          schema: { type: string, enum: [week, month, quarter, year, custom], default: week }
+        - { name: from, in: query, schema: { type: string, format: date }, description: period=custom 时必填 }
+        - { name: to, in: query, schema: { type: string, format: date }, description: period=custom 时必填 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  # --------------------------------------------------------------- Reports
+  /api/reports/generate:
+    post:
+      tags: [Reports]
+      summary: 生成周期报表
+      description: |
+        区间优先级：显式 from/to > period（作为目标区间内任意日期，YYYY-MM-DD 或 YYYY-MM）
+        > 按 type 取当前周期。type=day 为当天，week 为本周（周一至周日），
+        month/quarter/year 为当前自然周期。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type]
+              properties:
+                type: { type: string, enum: [day, week, month, quarter, year] }
+                period: { type: string, nullable: true, example: '2026-11' }
+                from: { type: string, format: date, nullable: true }
+                to: { type: string, format: date, nullable: true }
+      responses:
+        '201':
+          description: 已生成
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [report]
+                properties:
+                  report: { $ref: '#/components/schemas/Report' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/reports:
+    get:
+      tags: [Reports]
+      summary: 报表历史列表（按 createdAt 倒序，含 markdown 快照）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Report' }
+                  total: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/reports/{id}:
+    parameters:
+      - $ref: '#/components/parameters/PathId'
+    get:
+      tags: [Reports]
+      summary: 报表详情
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [report]
+                properties:
+                  report: { $ref: '#/components/schemas/Report' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/reports/{id}/export:
+    parameters:
+      - $ref: '#/components/parameters/PathId'
+    get:
+      tags: [Reports]
+      summary: 导出 Markdown
+      description: 返回 `text/markdown; charset=utf-8`，并带 Content-Disposition attachment。
+      responses:
+        '200':
+          description: Markdown 文件
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+              example: attachment; filename="report-clx.md"
+          content:
+            text/markdown:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # --------------------------------------------------- Knowledge Base
+  /api/kb/connectors:
+    get:
+      tags: [KnowledgeBase]
+      summary: 连接器列表
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/KbConnector' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [KnowledgeBase]
+      summary: 新建连接器
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type, path]
+              properties:
+                name: { type: string, minLength: 1 }
+                type: { type: string, enum: [obsidian, ima] }
+                path: { type: string }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connector]
+                properties:
+                  connector: { $ref: '#/components/schemas/KbConnector' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/kb/connectors/{id}:
+    parameters:
+      - $ref: '#/components/parameters/PathId'
+    patch:
+      tags: [KnowledgeBase]
+      summary: 更新连接器
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 1 }
+                type: { type: string, enum: [obsidian, ima] }
+                path: { type: string }
+                status: { type: string, enum: [on, off] }
+                meta: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connector]
+                properties:
+                  connector: { $ref: '#/components/schemas/KbConnector' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/kb/connectors/{id}/connect:
+    parameters:
+      - $ref: '#/components/parameters/PathId'
+    post:
+      tags: [KnowledgeBase]
+      summary: 启用连接器
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connector]
+                properties:
+                  connector: { $ref: '#/components/schemas/KbConnector' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/kb/connectors/{id}/reindex:
+    parameters:
+      - $ref: '#/components/parameters/PathId'
+    post:
+      tags: [KnowledgeBase]
+      summary: 重建索引
+      description: |
+        path 存在：递归读取目录下 `.md` 文件并入库（按 connectorId + path 去重更新）。
+        path 不存在：基于已有种子条目返回模拟计数（不新增文档）。
+      responses:
+        '200':
+          description: 索引结果
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [indexed, updated, durationMs]
+                properties:
+                  indexed: { type: integer }
+                  updated: { type: integer }
+                  durationMs: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/kb/search:
+    get:
+      tags: [KnowledgeBase]
+      summary: 知识库全文检索
+      description: 对 title 与 content 做不区分大小写包含匹配；snippet 为命中位置前后共 160 字上下文。
+      parameters:
+        - { name: q, in: query, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, took]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/KbSearchItem' }
+                  took: { type: integer, description: 耗时毫秒 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/kb/docs/{id}:
+    parameters:
+      - $ref: '#/components/parameters/PathId'
+    get:
+      tags: [KnowledgeBase]
+      summary: 知识库文档详情
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [doc]
+                properties:
+                  doc: { $ref: '#/components/schemas/KbDoc' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ------------------------------------------------------------------ Chat
+  /api/chat/sessions:
+    get:
+      tags: [Chat]
+      summary: 会话列表（updatedAt 倒序）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ChatSession' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Chat]
+      summary: 新建会话
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                model: { type: string, description: 省略时使用设置中的 defaultModel }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session]
+                properties:
+                  session: { $ref: '#/components/schemas/ChatSession' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/chat/sessions/{id}:
+    parameters:
+      - $ref: '#/components/parameters/PathId'
+    delete:
+      tags: [Chat]
+      summary: 删除会话及其消息
+      responses:
+        '204': { description: 已删除 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/chat/sessions/{id}/messages:
+    parameters:
+      - $ref: '#/components/parameters/PathId'
+    get:
+      tags: [Chat]
+      summary: 会话消息列表（createdAt 正序）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ChatMessage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Chat]
+      summary: 发送消息并以 SSE 流式返回回复
+      description: |
+        `Content-Type: text/event-stream`。事件顺序：
+
+        ```
+        event: delta
+        data: {"text":"..."}        # 多段，间隔 25–40ms
+
+        event: citations
+        data: {"items":[{"id","title","path","snippet"}]}
+
+        event: done
+        data: {"messageId":"..."}
+        ```
+
+        出错时发送 `event: error` + `data: {"code","message"}`。
+        每条回复后自动沉淀 1 条记忆（按文本去重）。
+        未配置 Key 或上游失败时使用内置 MockProvider，可完全离线运行。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string, minLength: 1 }
+                useKb: { type: boolean, default: false }
+                useMemory: { type: boolean, default: false }
+      responses:
+        '200':
+          description: SSE 事件流
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              example: |
+                event: delta
+                data: {"text":"## 结论先行\n"}
+
+                event: citations
+                data: {"items":[]}
+
+                event: done
+                data: {"messageId":"clx..."}
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  # --------------------------------------------------------------- Profile
+  /api/profile/memory:
+    get:
+      tags: [Profile]
+      summary: 记忆画像列表
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/MemoryItem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    delete:
+      tags: [Profile]
+      summary: 清空全部记忆
+      responses:
+        '204': { description: 已清空 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/profile/memory/{id}:
+    parameters:
+      - $ref: '#/components/parameters/PathId'
+    delete:
+      tags: [Profile]
+      summary: 删除单条记忆（幂等）
+      responses:
+        '204': { description: 已删除/不存在 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # -------------------------------------------------------------- Settings
+  /api/settings:
+    get:
+      tags: [Settings]
+      summary: 获取设置
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Settings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    patch:
+      tags: [Settings]
+      summary: 更新设置
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                maskSensitive: { type: boolean }
+                maskLlm: { type: boolean }
+                defaultModel: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [settings]
+                properties:
+                  settings: { $ref: '#/components/schemas/Settings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/llm/models:
+    get:
+      tags: [Settings]
+      summary: 模型配置列表（绝不返回明文 Key）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/LlmModel' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Settings]
+      summary: 新增模型配置（apiKey 以 AES-256-GCM 加密存储）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [vendor, model]
+              properties:
+                vendor: { type: string, example: deepseek }
+                model: { type: string, example: deepseek-chat }
+                apiKey: { type: string, format: password, nullable: true }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [model]
+                properties:
+                  model: { $ref: '#/components/schemas/LlmModel' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/llm/models/{id}/test:
+    parameters:
+      - $ref: '#/components/parameters/PathId'
+    post:
+      tags: [Settings]
+      summary: 测试模型配置
+      description: 未配置 Key 时返回 `{ok:false,message}` 并说明原因；配置 Key 时返回可用性提示。
+      responses:
+        '200':
+          description: 测试结果
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, message]
+                properties:
+                  ok: { type: boolean }
+                  message: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/llm/models/{id}:
+    parameters:
+      - $ref: '#/components/parameters/PathId'
+    delete:
+      tags: [Settings]
+      summary: 删除模型配置
+      responses:
+        '204': { description: 已删除 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ------------------------------------------------------------------ User
+  /api/user/export:
+    get:
+      tags: [User]
+      summary: 导出个人数据（JSON attachment）
+      description: 包含 user、categories、fields、records（含 kbDocIds/values）、reports、memory、settings。
+      responses:
+        '200':
+          description: JSON 文件
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/user/data:
+    delete:
+      tags: [User]
+      summary: 清空业务数据（保留账号、设置与模型配置）
+      description: 删除记录、分类、字段、报表、知识库连接器/文档、会话与记忆；保留 User、Setting、LlmModel。
+      responses:
+        '204': { description: 已清空 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 登录/刷新获得的 accessToken，有效期 15 分钟。
+    refreshCookie:
+      type: apiKey
+      in: cookie
+      name: la_refresh
+      description: HttpOnly refresh token，Path=/api/auth，7 天。
+
+  parameters:
+    PathId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    Unauthorized:
+      description: 未认证或令牌失效
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { code: UNAUTHORIZED, message: 未登录或登录已过期 }
+    Forbidden:
+      description: 无权限
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { code: FORBIDDEN, message: 无权限执行该操作 }
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { code: NOT_FOUND, message: 资源不存在 }
+    Conflict:
+      description: 冲突
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { code: CONFLICT, message: 同名资源已存在 }
+    CategoryNotEmpty:
+      description: 分类非空（有子分类或记录）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { code: CATEGORY_NOT_EMPTY, message: 该分类下存在子分类或记录，无法删除 }
+    ValidationError:
+      description: 参数校验失败
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { code: VALIDATION_ERROR, message: name: 必填 }
+    TooManyRequests:
+      description: 登录失败次数超限
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { code: TOO_MANY_REQUESTS, message: 登录失败次数过多，请 15 分钟后再试 }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, CATEGORY_NOT_EMPTY, VALIDATION_ERROR, TOO_MANY_REQUESTS]
+            message: { type: string }
+
+    User:
+      type: object
+      required: [id, name, email]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+
+    LoginResponse:
+      type: object
+      required: [user, accessToken]
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+        accessToken: { type: string }
+
+    Category:
+      type: object
+      required: [id, name, parentId, sort, recordCount]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        parentId: { type: string, nullable: true }
+        sort: { type: integer }
+        recordCount: { type: integer }
+
+    FieldType:
+      type: string
+      enum: [text, textarea, number, date, select, multi, file]
+
+    FieldDef:
+      type: object
+      required: [id, categoryId, name, group, type, required, options, note, sort, isCommon]
+      properties:
+        id: { type: string }
+        categoryId: { type: string }
+        name: { type: string }
+        group: { type: string }
+        type: { $ref: '#/components/schemas/FieldType' }
+        required: { type: boolean }
+        options:
+          type: array
+          items: { type: string }
+        note: { type: string, nullable: true }
+        sort: { type: integer }
+        isCommon:
+          type: boolean
+          description: true 表示接口追加的公共字段（状态/截止日期），不可删除
+          example: false
+
+    Record:
+      type: object
+      required: [id, categoryId, categoryPath, name, sub, status, risk, dueDate, hours, values, kbDocIds, kbDocs, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        categoryId: { type: string }
+        categoryPath: { type: string, example: 合同审查 / 销售合同 }
+        name: { type: string }
+        sub: { type: string }
+        status: { type: string, enum: [doing, done] }
+        risk: { type: string, example: 中 }
+        dueDate: { type: string, format: date, nullable: true }
+        hours: { type: number }
+        values:
+          type: object
+          additionalProperties: true
+          description: 以字段 id 为键的动态字段值
+        kbDocIds:
+          type: array
+          items: { type: string }
+        kbDocs:
+          type: array
+          items:
+            type: object
+            required: [id, title]
+            properties:
+              id: { type: string }
+              title: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    RecordInput:
+      type: object
+      required: [categoryId, name, dueDate]
+      properties:
+        categoryId: { type: string }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        sub: { type: string }
+        status: { type: string, enum: [doing, done] }
+        risk: { type: string }
+        dueDate: { type: string, format: date }
+        hours: { type: number, minimum: 0 }
+        values:
+          type: object
+          additionalProperties: true
+        kbDocIds:
+          type: array
+          items: { type: string }
+
+    RecordPatch:
+      type: object
+      properties:
+        categoryId: { type: string }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        sub: { type: string }
+        status: { type: string, enum: [doing, done] }
+        risk: { type: string }
+        dueDate: { type: string, format: date }
+        hours: { type: number, minimum: 0 }
+        values:
+          type: object
+          additionalProperties: true
+        kbDocIds:
+          type: array
+          items: { type: string }
+
+    RecordResponse:
+      type: object
+      required: [record]
+      properties:
+        record: { $ref: '#/components/schemas/Record' }
+
+    RecordList:
+      type: object
+      required: [items, total, page, pageSize]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Record' }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+
+    DashboardSummary:
+      type: object
+      required: [range, stats, byCategory, statusDist, trend]
+      properties:
+        range:
+          type: object
+          required: [from, to, label]
+          properties:
+            from: { type: string, format: date }
+            to: { type: string, format: date }
+            label: { type: string, example: 2026 年第 45 周 }
+        stats:
+          type: object
+          required: [created, done, doing, overdue, hours, doneHours, rate]
+          properties:
+            created: { type: integer }
+            done: { type: integer }
+            doing: { type: integer }
+            overdue: { type: integer }
+            hours: { type: number }
+            doneHours: { type: number }
+            rate: { type: integer, description: 办结率百分比 0–100 }
+        byCategory:
+          type: array
+          items:
+            type: object
+            required: [categoryId, name, count]
+            properties:
+              categoryId: { type: string }
+              name: { type: string }
+              count: { type: integer }
+        statusDist:
+          type: array
+          description: running / waiting / overdue 互斥
+          items:
+            type: object
+            required: [key, name, count]
+            properties:
+              key: { type: string, enum: [running, waiting, overdue] }
+              name: { type: string }
+              count: { type: integer }
+        trend:
+          type: array
+          items:
+            type: object
+            required: [date, created, done]
+            properties:
+              date: { type: string, format: date }
+              created: { type: integer }
+              done: { type: integer }
+
+    Report:
+      type: object
+      required: [id, type, title, rangeFrom, rangeTo, markdown, createdAt]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [day, week, month, quarter, year] }
+        title: { type: string }
+        rangeFrom: { type: string, format: date }
+        rangeTo: { type: string, format: date }
+        markdown: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    KbConnector:
+      type: object
+      required: [id, name, type, status, path, meta, indexedCount, lastIndexedAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [obsidian, ima] }
+        status: { type: string, enum: [on, off] }
+        path: { type: string }
+        meta: { type: string }
+        indexedCount: { type: integer }
+        lastIndexedAt: { type: string, format: date-time, nullable: true }
+
+    KbSearchItem:
+      type: object
+      required: [id, title, path, snippet, score]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        path: { type: string }
+        snippet: { type: string }
+        score: { type: number }
+
+    KbDoc:
+      type: object
+      required: [id, connectorId, title, path, content, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        connectorId: { type: string, nullable: true }
+        title: { type: string }
+        path: { type: string }
+        content: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    ChatSession:
+      type: object
+      required: [id, title, model, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        model: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    ChatMessage:
+      type: object
+      required: [id, role, content, citations, createdAt]
+      properties:
+        id: { type: string }
+        role: { type: string, enum: [user, assistant] }
+        content: { type: string }
+        citations:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              title: { type: string }
+              path: { type: string }
+              snippet: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    MemoryItem:
+      type: object
+      required: [id, text, source, weight, createdAt]
+      properties:
+        id: { type: string }
+        text: { type: string }
+        source: { type: string, example: chat }
+        weight: { type: number }
+        createdAt: { type: string, format: date-time }
+
+    Settings:
+      type: object
+      required: [maskSensitive, maskLlm, defaultModel]
+      properties:
+        maskSensitive: { type: boolean }
+        maskLlm: { type: boolean }
+        defaultModel: { type: string }
+
+    LlmModel:
+      type: object
+      required: [id, vendor, model, isDefault, hasKey]
+      properties:
+        id: { type: string }
+        vendor: { type: string }
+        model: { type: string }
+        isDefault: { type: boolean }
+        hasKey: { type: boolean }

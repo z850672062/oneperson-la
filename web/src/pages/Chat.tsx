@@ -1,0 +1,523 @@
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Alert, App, Button, Input, Modal, Select, Spin } from 'antd'
+import { SendOutlined } from '@ant-design/icons'
+import { apiErrorMessage } from '../api/client'
+import {
+  createSession,
+  listMessages,
+  listSessions,
+  streamChat,
+} from '../api/chat'
+import { listMemory, deleteMemory, clearMemory } from '../api/memory'
+import { getSettings, listModels } from '../api/settings'
+import { toastSuccess } from '../api/notify'
+import { formatDateTime } from '../utils/format'
+import PageHeader from '../components/PageHeader'
+import EmptyState from '../components/EmptyState'
+import MarkdownDoc from '../components/MarkdownDoc'
+import LoadError from '../components/LoadError'
+import type { ChatMessage, ChatSession, Citation, LlmModel, MemoryItem } from '../types'
+
+const SUGGESTIONS = [
+  '本周有哪些事项即将到期？',
+  '帮我复盘一下最近的合同审查工作',
+  '根据知识库起草一份催告函要点',
+]
+
+export default function Chat() {
+  const navigate = useNavigate()
+  const { modal } = App.useApp()
+
+  const [reloadKey, setReloadKey] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [sessions, setSessions] = useState<ChatSession[]>([])
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [input, setInput] = useState('')
+  const [sending, setSending] = useState(false)
+  const [streamText, setStreamText] = useState('')
+  const [streamCitations, setStreamCitations] = useState<Citation[]>([])
+  const [models, setModels] = useState<LlmModel[]>([])
+  const [modelId, setModelId] = useState<string | null>(null)
+  const [kbOn, setKbOn] = useState(true)
+  const [memOn, setMemOn] = useState(true)
+  const [memory, setMemory] = useState<MemoryItem[]>([])
+  const [memoryOpen, setMemoryOpen] = useState(false)
+  const [memoryLoading, setMemoryLoading] = useState(false)
+
+  const abortRef = useRef<AbortController | null>(null)
+  const bodyRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    const init = async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        const sessionList = await listSessions()
+        let current = sessionList[0]
+        if (!current) {
+          current = await createSession()
+          sessionList.unshift(current)
+        }
+        if (cancelled) return
+        setSessions([...sessionList])
+        setSessionId(current.id)
+        const history = await listMessages(current.id)
+        if (cancelled) return
+        setMessages(history)
+      } catch (initError) {
+        if (!cancelled) setError(apiErrorMessage(initError))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+
+      const modelList = await listModels().catch(() => [] as LlmModel[])
+      const settings = await getSettings().catch(() => null)
+      if (cancelled) return
+      setModels(modelList)
+      const preferred = settings?.defaultModel
+      const matched =
+        modelList.find((item) => item.id === preferred || item.model === preferred) ?? modelList[0]
+      setModelId(matched?.id ?? null)
+
+      try {
+        const memories = await listMemory()
+        if (!cancelled) setMemory(memories)
+      } catch {
+        /* 记忆加载失败不阻塞对话 */
+      }
+    }
+
+    void init()
+    return () => {
+      cancelled = true
+      abortRef.current?.abort()
+    }
+  }, [reloadKey])
+
+  useEffect(() => {
+    const element = bodyRef.current
+    if (element) element.scrollTop = element.scrollHeight
+  }, [messages, streamText, sending])
+
+  const refreshMemory = async () => {
+    try {
+      setMemory(await listMemory())
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const send = async (text?: string) => {
+    const content = (text ?? input).trim()
+    if (!content || !sessionId || sending) return
+
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    const userMessage: ChatMessage = {
+      id: `local-user-${Date.now()}`,
+      role: 'user',
+      content,
+    }
+    setMessages((prev) => [...prev, userMessage])
+    setInput('')
+    setSending(true)
+    setError(null)
+    setStreamText('')
+    setStreamCitations([])
+
+    let full = ''
+    let citations: Citation[] = []
+    let finished = false
+
+    try {
+      await streamChat(
+        sessionId,
+        { content, modelId, useKb: kbOn, useMemory: memOn },
+        {
+          onDelta: (delta) => {
+            full += delta
+            setStreamText(full)
+          },
+          onCitations: (next) => {
+            citations = next
+            setStreamCitations(next)
+          },
+          onDone: () => {
+            finished = true
+            if (full.trim()) {
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: `local-ai-${Date.now()}`,
+                  role: 'assistant',
+                  content: full,
+                  citations,
+                  createdAt: new Date().toISOString(),
+                },
+              ])
+            } else {
+              setError('未收到模型回复，请稍后重试')
+            }
+            setStreamText('')
+            setStreamCitations([])
+            setSending(false)
+            void refreshMemory()
+          },
+          onError: (message) => {
+            finished = true
+            setError(message)
+            setStreamText('')
+            setStreamCitations([])
+            setSending(false)
+          },
+        },
+        controller.signal,
+      )
+      if (!finished) {
+        if (full.trim()) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `local-ai-${Date.now()}`,
+              role: 'assistant',
+              content: full,
+              citations,
+              createdAt: new Date().toISOString(),
+            },
+          ])
+        }
+        setStreamText('')
+        setSending(false)
+      }
+    } catch (sendError) {
+      const aborted = (sendError as { name?: string }).name === 'AbortError'
+      if (!aborted) {
+        setError(apiErrorMessage(sendError))
+        setStreamText('')
+      }
+      setSending(false)
+    }
+  }
+
+  const newSession = async () => {
+    abortRef.current?.abort()
+    setSending(false)
+    setStreamText('')
+    setStreamCitations([])
+    try {
+      const session = await createSession()
+      setSessions((prev) => [session, ...prev])
+      setSessionId(session.id)
+      setMessages([])
+      setError(null)
+      setInput('')
+      toastSuccess('已开始新会话')
+    } catch {
+      /* 统一错误提示 */
+    }
+  }
+
+  const removeMemoryItem = async (id: string) => {
+    try {
+      await deleteMemory(id)
+      setMemory((prev) => prev.filter((item) => item.id !== id))
+    } catch {
+      /* 统一错误提示 */
+    }
+  }
+
+  const clearAllMemory = () => {
+    modal.confirm({
+      title: '清空记忆画像',
+      content: '清空后将不再依据历史偏好生成回答，确认继续？',
+      okText: '清空',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setMemoryLoading(true)
+        try {
+          await clearMemory()
+          setMemory([])
+          toastSuccess('记忆画像已清空')
+        } catch {
+          /* 统一错误提示 */
+        } finally {
+          setMemoryLoading(false)
+        }
+      },
+    })
+  }
+
+  const modelOptions = models.map((model) => ({
+    value: model.id,
+    label: `${model.vendor} · ${model.model}`,
+  }))
+
+  const currentModel = models.find((model) => model.id === modelId)
+
+  return (
+    <main>
+      <PageHeader
+        title="法务对话"
+        description={currentModel ? `${currentModel.vendor} · ${currentModel.model}` : '本地模型 / 知识库问答'}
+        actions={
+          <>
+            {sessions.length > 1 ? (
+              <Select
+                aria-label="切换会话"
+                style={{ width: 150 }}
+                value={sessionId ?? undefined}
+                options={sessions.map((session) => ({
+                  value: session.id,
+                  label: session.title || '未命名会话',
+                }))}
+                onChange={(next) => {
+                  setSessionId(next)
+                  void listMessages(next).then(setMessages).catch(() => setMessages([]))
+                }}
+              />
+            ) : null}
+            <Button onClick={() => void newSession()}>新会话</Button>
+          </>
+        }
+      />
+
+      <div className="page-content">
+        {error && !sessionId ? (
+          <div style={{ marginBottom: 14 }}>
+            <LoadError
+              message="对话服务加载失败"
+              description={error}
+              onRetry={() => setReloadKey((value) => value + 1)}
+            />
+          </div>
+        ) : null}
+
+        <div className="chat-wrap">
+          <div className="card chat-panel">
+            <div className="chat-head">
+              <Select
+                className="chat-model"
+                aria-label="选择模型"
+                size="small"
+                value={modelId ?? undefined}
+                placeholder={models.length ? '默认模型' : '未配置模型'}
+                options={modelOptions}
+                onChange={setModelId}
+                allowClear
+              />
+              {!models.length ? (
+                <Button type="link" size="small" onClick={() => navigate('/settings')}>
+                  去设置模型
+                </Button>
+              ) : null}
+              <button
+                type="button"
+                className={`tchip${kbOn ? ' on' : ''}`}
+                aria-pressed={kbOn}
+                onClick={() => setKbOn((value) => !value)}
+              >
+                知识库
+              </button>
+              <button
+                type="button"
+                className={`tchip${memOn ? ' on' : ''}`}
+                aria-pressed={memOn}
+                onClick={() => setMemOn((value) => !value)}
+              >
+                记忆
+              </button>
+              <span className="card-note chat-count">
+                {loading ? '连接中…' : `${messages.length} 条消息`}
+              </span>
+            </div>
+
+            <div className="chat-body" ref={bodyRef}>
+              {loading ? (
+                <div style={{ margin: 'auto', textAlign: 'center' }}>
+                  <Spin />
+                  <div className="card-note" style={{ marginTop: 8 }}>
+                    正在准备对话…
+                  </div>
+                </div>
+              ) : null}
+
+              {!loading && !messages.length && !sending ? (
+                <div className="chat-empty">
+                  <EmptyState
+                    title="开始一次法务对话"
+                    description="AI 会结合已接入的知识库与记忆画像回答，并在有依据时给出引用标签"
+                  />
+                </div>
+              ) : null}
+
+              {messages.map((message) => (
+                <div className={`msg msg-${message.role === 'user' ? 'user' : 'ai'}`} key={message.id}>
+                  <div className="bubble">
+                    {message.role === 'user' ? (
+                      message.content
+                    ) : (
+                      <MarkdownDoc content={message.content} />
+                    )}
+                    {message.citations?.length
+                      ? message.citations.map((citation, index) => (
+                          <span className="cite" key={`${message.id}-cite-${index}`}>
+                            {citation.title}
+                          </span>
+                        ))
+                      : null}
+                  </div>
+                  <div className="msg-meta">
+                    {message.role === 'user' ? '我' : 'AI 助手'}
+                    {message.createdAt ? ` · ${formatDateTime(message.createdAt)}` : ''}
+                  </div>
+                </div>
+              ))}
+
+              {sending ? (
+                <div className="msg msg-ai">
+                  <div className="bubble">
+                    {streamText ? (
+                      <MarkdownDoc content={streamText} />
+                    ) : (
+                      <span className="typing" aria-label="正在生成回答">
+                        <span />
+                        <span />
+                        <span />
+                      </span>
+                    )}
+                    {streamCitations.map((citation, index) => (
+                      <span className="cite" key={`stream-cite-${index}`}>
+                        {citation.title}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="msg-meta">正在生成…</div>
+                </div>
+              ) : null}
+            </div>
+
+            {error && sessionId ? (
+              <div className="chat-error">
+                <Alert
+                  type="error"
+                  showIcon
+                  closable
+                  message={error}
+                  onClose={() => setError(null)}
+                />
+              </div>
+            ) : null}
+
+            <div className="chat-input">
+              <Input.TextArea
+                value={input}
+                autoSize={{ minRows: 2, maxRows: 4 }}
+                placeholder="描述你的问题，Enter 发送，Shift + Enter 换行"
+                aria-label="对话输入框"
+                disabled={!sessionId || loading}
+                onChange={(event) => setInput(event.target.value)}
+                onPressEnter={(event) => {
+                  if (!event.shiftKey) {
+                    event.preventDefault()
+                    void send()
+                  }
+                }}
+              />
+              <Button
+                type="primary"
+                icon={<SendOutlined />}
+                loading={sending}
+                disabled={!sessionId || !input.trim()}
+                onClick={() => void send()}
+              >
+                发送
+              </Button>
+            </div>
+          </div>
+
+          <aside aria-label="对话辅助">
+            <section className="rail">
+              <h2>
+                记忆画像
+                <button type="button" onClick={() => setMemoryOpen(true)}>
+                  管理
+                </button>
+              </h2>
+              {memory.length ? (
+                <div className="tag-cloud">
+                  {memory.slice(0, 8).map((item) => (
+                    <span className="memory-tag" key={item.id}>
+                      {item.content.length > 12 ? `${item.content.slice(0, 12)}…` : item.content}
+                      <button
+                        type="button"
+                        aria-label={`删除记忆 ${item.content}`}
+                        onClick={() => void removeMemoryItem(item.id)}
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="card-note">暂无记忆标签。对话中形成的稳定偏好会显示在这里。</p>
+              )}
+            </section>
+
+            <section className="rail">
+              <h2>建议提问</h2>
+              <ul className="suggest-list">
+                {SUGGESTIONS.map((suggestion) => (
+                  <li key={suggestion}>
+                    <button
+                      type="button"
+                      disabled={!sessionId || sending}
+                      onClick={() => void send(suggestion)}
+                    >
+                      {suggestion}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          </aside>
+        </div>
+      </div>
+
+      <Modal
+        open={memoryOpen}
+        title="记忆画像管理"
+        width={520}
+        onCancel={() => setMemoryOpen(false)}
+        footer={[
+          <Button key="clear" danger disabled={!memory.length} loading={memoryLoading} onClick={clearAllMemory}>
+            清空全部
+          </Button>,
+          <Button key="close" onClick={() => setMemoryOpen(false)}>
+            关闭
+          </Button>,
+        ]}
+      >
+        {memory.length ? (
+          memory.map((item) => (
+            <div className="model-row" key={item.id}>
+              <span style={{ flex: 1 }}>{item.content}</span>
+              <Button type="link" size="small" danger onClick={() => void removeMemoryItem(item.id)}>
+                删除
+              </Button>
+            </div>
+          ))
+        ) : (
+          <EmptyState compact title="暂无记忆标签" description="对话后自动沉淀的偏好会显示在这里" />
+        )}
+      </Modal>
+    </main>
+  )
+}
