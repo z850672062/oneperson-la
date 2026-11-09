@@ -84,6 +84,12 @@ docker compose -f docker-compose.prod.yml up -d --build
 - 迁移：应用容器启动时自动执行 `prisma migrate deploy`
 - 备份：`docker exec oneperson-la-mysql mysqldump -ula -p"$MYSQL_PASSWORD" oneperson_la > backup.sql`
 - Obsidian：宿主目录以只读方式挂到容器 `/vault`（`.env` 的 `OBSIDIAN_VAULT`），连接器路径填 `/vault/子目录`
+  - 库在 Windows 本机：两种接法
+    - **SMB 挂载（推荐，实时只读）**：Windows 上共享该文件夹 → Linux 执行
+      `mount -t cifs //<Windows_IP>/<共享名> /mnt/obsidian_win -o username=<用户>,password=<密码>,ro,uid=1000,gid=1000`
+      → `.env` 设 `OBSIDIAN_VAULT=/mnt/obsidian_win` → `docker compose -f docker-compose.prod.yml up -d app`，连接器填 `/vault`
+    - **Nextcloud 同步**：Windows 客户端把库同步到服务器 `/mnt/nextcloud_data/<目录>`，`OBSIDIAN_VAULT` 指向该目录
+  - 路径写错时「索引」会直接报“路径不可访问”，不会再假装已连接
 - 对外访问建议用已有 nginx 反代 `127.0.0.1:8080` 并配置 HTTPS；HTTPS 下将 `COOKIE_SECURE` 置为 `true`
 
 ## 常用脚本（根目录）

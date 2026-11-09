@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { prisma } from '../prisma';
+import { validationError } from '../utils/errors';
 
 export interface KbSearchResult {
   id: string;
@@ -214,17 +215,15 @@ export async function reindexConnector(connectorId: string) {
       data: { status: 'on', indexedCount: indexed, lastIndexedAt: new Date() }
     });
   } else {
-    const docsCount = await prisma.kbDoc.count({ where: { connectorId } });
-    indexed = docsCount > 0 ? docsCount : connector.indexedCount;
+    // 路径不可访问时明确报错，避免显示“已连接”却索引不到任何内容
+    const message = connector.path
+      ? `路径不可访问：${connector.path}（请确认目录已挂载到容器内，且连接器填写的是容器内路径）`
+      : '连接器未配置路径';
     await prisma.kbConnector.update({
       where: { id: connectorId },
-      data: {
-        status: 'on',
-        indexedCount: indexed,
-        lastIndexedAt: new Date(),
-        meta: connector.meta || `路径不可用，已按种子条目模拟索引 ${indexed} 条`
-      }
+      data: { status: 'error', lastIndexedAt: new Date(), meta: message }
     });
+    throw validationError(message);
   }
 
   return { indexed, updated, durationMs: Math.max(1, Date.now() - startedAt) };
