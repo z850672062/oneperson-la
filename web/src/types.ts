@@ -181,6 +181,7 @@ export interface LlmModel {
   id: string
   vendor: string
   model: string
+  baseUrl?: string | null
   isDefault?: boolean
   [key: string]: unknown
 }

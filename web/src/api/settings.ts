@@ -20,6 +20,7 @@ export async function listModels(): Promise<LlmModel[]> {
 export interface ModelInput {
   vendor: string
   model: string
+  baseUrl?: string
   apiKey?: string
 }
 

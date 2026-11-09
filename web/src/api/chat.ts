@@ -72,6 +72,7 @@ export interface ChatSendPayload {
   modelId?: string | null
   useKb: boolean
   useMemory: boolean
+  useWeb?: boolean
 }
 
 export interface StreamHandlers {

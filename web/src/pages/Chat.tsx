@@ -43,6 +43,7 @@ export default function Chat() {
   const [modelId, setModelId] = useState<string | null>(null)
   const [kbOn, setKbOn] = useState(true)
   const [memOn, setMemOn] = useState(true)
+  const [webOn, setWebOn] = useState(true)
   const [memory, setMemory] = useState<MemoryItem[]>([])
   const [memoryOpen, setMemoryOpen] = useState(false)
   const [memoryLoading, setMemoryLoading] = useState(false)
@@ -139,7 +140,7 @@ export default function Chat() {
     try {
       await streamChat(
         sessionId,
-        { content, modelId, useKb: kbOn, useMemory: memOn },
+        { content, modelId, useKb: kbOn, useMemory: memOn, useWeb: webOn },
         {
           onDelta: (delta) => {
             full += delta
@@ -333,6 +334,15 @@ export default function Chat() {
                 onClick={() => setMemOn((value) => !value)}
               >
                 记忆
+              </button>
+              <button
+                type="button"
+                className={`tchip${webOn ? ' on' : ''}`}
+                aria-pressed={webOn}
+                title="调用 DeepSeek 网页搜索与抓取（按成功请求计费）"
+                onClick={() => setWebOn((value) => !value)}
+              >
+                联网
               </button>
               <span className="card-note chat-count">
                 {loading ? '连接中…' : `${messages.length} 条消息`}

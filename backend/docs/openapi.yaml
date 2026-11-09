@@ -831,6 +831,7 @@ paths:
                 content: { type: string, minLength: 1 }
                 useKb: { type: boolean, default: false }
                 useMemory: { type: boolean, default: false }
+                useWeb: { type: boolean, default: false, description: '是否调用 DeepSeek 联网搜索/抓取工具（仅 DeepSeek 厂商可用，按成功请求计费）' }
       responses:
         '200':
           description: SSE 事件流

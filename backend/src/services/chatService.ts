@@ -2,7 +2,9 @@ import type { Response } from 'express';
 import { prisma } from '../prisma';
 import { env } from '../env';
 import { decryptSecret } from '../utils/crypto';
+import { chatCompletionsUrl } from '../utils/llmEndpoint';
 import { searchKb, type KbSearchResult } from './kbService';
+import type { WebSource } from './webSearchService';
 
 export interface Citation {
   id: string;
@@ -113,11 +115,13 @@ export async function streamMockAnswer(
 interface ResolvedModel {
   model: string;
   apiKey: string;
+  baseUrl: string | null;
+  vendor: string;
 }
 
-export async function resolveDeepSeekKey(sessionModel: string): Promise<ResolvedModel | null> {
+export async function resolveChatModel(sessionModel: string): Promise<ResolvedModel | null> {
+  // 不限定厂商：兼容 DeepSeek、火山方舟、OpenAI 等所有 OpenAI 兼容服务
   const configs = await prisma.llmModel.findMany({
-    where: { vendor: 'deepseek' },
     orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }]
   });
   // 兼容历史数据：会话里可能存的是模型名，也可能是模型配置 ID
@@ -127,24 +131,35 @@ export async function resolveDeepSeekKey(sessionModel: string): Promise<Resolved
 
   if (matched?.apiKeyEnc) {
     try {
-      return { model: matched.model, apiKey: decryptSecret(matched.apiKeyEnc) };
+      return {
+        model: matched.model,
+        apiKey: decryptSecret(matched.apiKeyEnc),
+        baseUrl: matched.baseUrl,
+        vendor: matched.vendor
+      };
     } catch {
       // 密文无法解密时继续尝试环境变量
     }
   }
   if (env.llmApiKey) {
-    return { model: matched?.model || sessionModel || 'deepseek-chat', apiKey: env.llmApiKey };
+    return {
+      model: matched?.model || sessionModel || 'deepseek-chat',
+      apiKey: env.llmApiKey,
+      baseUrl: matched?.baseUrl ?? null,
+      vendor: matched?.vendor || 'DeepSeek'
+    };
   }
   return null;
 }
 
-export async function streamDeepSeek(
+export async function streamChatCompletion(
   resolved: ResolvedModel,
   systemPrompt: string,
   history: Array<{ role: string; content: string }>,
   res: Response
 ): Promise<{ text: string; forwarded: number }> {
-  const response = await fetch('https://api.deepseek.com/chat/completions', {
+  const endpoint = chatCompletionsUrl(resolved.baseUrl, resolved.vendor);
+  const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -160,7 +175,7 @@ export async function streamDeepSeek(
 
   if (!response.ok || !response.body) {
     const detail = (await response.text().catch(() => '')).slice(0, 200);
-    throw new Error(`DeepSeek 上游返回 ${response.status}${detail ? `：${detail}` : ''}`);
+    throw new Error(`上游返回 ${response.status}${detail ? `：${detail}` : ''}（${endpoint}）`);
   }
 
   const reader = response.body.getReader();
@@ -199,7 +214,11 @@ export async function streamDeepSeek(
   return { text, forwarded };
 }
 
-export function buildSystemPrompt(context: ChatContext, resolved?: ResolvedModel): string {
+export function buildSystemPrompt(
+  context: ChatContext,
+  resolved?: ResolvedModel,
+  web: WebSource[] = []
+): string {
   const now = new Date();
   const beijing = new Intl.DateTimeFormat('zh-CN', {
     timeZone: 'Asia/Shanghai',
@@ -234,6 +253,14 @@ export function buildSystemPrompt(context: ChatContext, resolved?: ResolvedModel
   if (context.memory.length) {
     parts.push('用户记忆画像（用于贴合其习惯，不要直接照抄）：');
     context.memory.forEach((item) => parts.push(`- ${item}`));
+  }
+  if (web.length) {
+    parts.push(
+      '以下是实时联网检索到的网页资料（来自网络，可能有过时或错误信息）。涉及最新新闻、政策法规更新、价格、机构/产品现状、具体网页内容时，必须优先依据这些资料作答，并在对应句子末尾标注 [网络序号]。资料未覆盖或相互矛盾时，明确说明并给出核实建议。'
+    );
+    web.forEach((item, index) => {
+      parts.push(`[网络${index + 1}] ${item.title}（${item.url}）\n${item.summary}`);
+    });
   }
   return parts.join('\n');
 }

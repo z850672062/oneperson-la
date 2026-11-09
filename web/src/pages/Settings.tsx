@@ -212,11 +212,20 @@ interface ModelModalProps {
 
 const VENDOR_OPTIONS = [
   { value: 'DeepSeek', label: 'DeepSeek' },
+  { value: '火山方舟', label: '火山方舟（豆包）' },
   { value: 'OpenAI', label: 'OpenAI' },
   { value: 'Qwen', label: '通义千问' },
   { value: 'Claude', label: 'Claude' },
   { value: 'Ollama', label: 'Ollama（本地）' },
 ]
+
+const BASE_URL_HINTS: Record<string, string> = {
+  DeepSeek: '默认 https://api.deepseek.com',
+  火山方舟: 'https://ark.cn-beijing.volces.com/api/v3',
+  OpenAI: '默认 https://api.openai.com/v1',
+  Qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  Ollama: 'http://127.0.0.1:11434/v1',
+}
 
 function ModelModal({ open, onClose, onChanged }: ModelModalProps) {
   const { modal } = App.useApp()
@@ -224,6 +233,7 @@ function ModelModal({ open, onClose, onChanged }: ModelModalProps) {
   const [vendor, setVendor] = useState('DeepSeek')
   const [model, setModel] = useState('')
   const [apiKey, setApiKey] = useState('')
+  const [baseUrl, setBaseUrl] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [testingId, setTestingId] = useState<string | null>(null)
@@ -259,11 +269,13 @@ function ModelModal({ open, onClose, onChanged }: ModelModalProps) {
       await createModel({
         vendor,
         model: model.trim(),
+        baseUrl: baseUrl.trim() || undefined,
         apiKey: apiKey.trim() || undefined,
       })
       toastSuccess('模型已添加')
       setModel('')
       setApiKey('')
+      setBaseUrl('')
       await load()
       onChanged()
     } catch (addError) {
@@ -371,6 +383,20 @@ function ModelModal({ open, onClose, onChanged }: ModelModalProps) {
             onChange={(event) => setApiKey(event.target.value)}
           />
           <div className="field-hint">Ollama 本地模型可留空；其他厂商需填写有效 Key。</div>
+        </div>
+        <div className="record-field" style={{ gridColumn: '1 / -1' }}>
+          <label htmlFor="model-base-url">
+            <b>Base URL</b>
+          </label>
+          <Input
+            id="model-base-url"
+            value={baseUrl}
+            placeholder={BASE_URL_HINTS[vendor] || 'https://api.example.com/v1'}
+            onChange={(event) => setBaseUrl(event.target.value)}
+          />
+          <div className="field-hint">
+            留空则按厂商默认地址；火山方舟填 {BASE_URL_HINTS['火山方舟']}，会自动补 /chat/completions。
+          </div>
         </div>
       </div>
 

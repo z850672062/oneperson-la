@@ -183,6 +183,7 @@ export function serializeLlmModel(model: LlmModel) {
     id: model.id,
     vendor: model.vendor,
     model: model.model,
+    baseUrl: model.baseUrl,
     isDefault: model.isDefault,
     hasKey: Boolean(model.apiKeyEnc)
   };

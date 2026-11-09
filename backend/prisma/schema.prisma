@@ -192,6 +192,7 @@ model LlmModel {
   id         String   @id @default(cuid())
   vendor     String
   model      String
+  baseUrl    String?  @db.VarChar(512)
   apiKeyEnc  String?
   isDefault  Boolean  @default(false)
   createdAt  DateTime @default(now())

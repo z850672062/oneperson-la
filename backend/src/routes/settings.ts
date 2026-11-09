@@ -5,6 +5,7 @@ import { prisma } from '../prisma';
 import { asyncHandler } from '../utils/asyncHandler';
 import { notFound } from '../utils/errors';
 import { encryptSecret, decryptSecret } from '../utils/crypto';
+import { chatCompletionsUrl } from '../utils/llmEndpoint';
 import { serializeLlmModel, serializeSettings } from '../services/serializers';
 
 export const settingsRouter = Router();
@@ -50,6 +51,12 @@ settingsRouter.patch(
 const createModelSchema = z.object({
   vendor: z.string({ required_error: 'vendor 必填' }).trim().min(1),
   model: z.string({ required_error: 'model 必填' }).trim().min(1),
+  baseUrl: z
+    .string()
+    .trim()
+    .url('Base URL 需为合法地址')
+    .optional()
+    .or(z.literal('')),
   apiKey: z.string().optional()
 });
 
@@ -80,6 +87,7 @@ llmRouter.post(
       data: {
         vendor: body.vendor,
         model: body.model,
+        baseUrl: body.baseUrl?.trim() || null,
         apiKeyEnc: body.apiKey ? encryptSecret(body.apiKey) : null,
         isDefault: count === 0
       }
@@ -110,10 +118,7 @@ llmRouter.post(
       return;
     }
 
-    const endpoint =
-      model.vendor.toLowerCase() === 'deepseek'
-        ? 'https://api.deepseek.com/chat/completions'
-        : 'https://api.openai.com/v1/chat/completions';
+    const endpoint = chatCompletionsUrl(model.baseUrl, model.vendor);
 
     try {
       const started = Date.now();
