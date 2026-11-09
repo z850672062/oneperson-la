@@ -28,3 +28,8 @@ export async function me(): Promise<User> {
 export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
   await api.post('/auth/password', { currentPassword, newPassword })
 }
+
+export async function updateProfile(name: string): Promise<User> {
+  const { data } = await api.patch<{ user?: User } & User>('/auth/me', { name })
+  return data.user ?? data
+}

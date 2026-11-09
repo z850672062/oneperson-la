@@ -28,6 +28,14 @@ const passwordSchema = z.object({
   newPassword: z.string().min(8, '新密码至少 8 位')
 });
 
+const profileSchema = z.object({
+  name: z
+    .string({ required_error: 'name 必填' })
+    .trim()
+    .min(1, '名称不能为空')
+    .max(30, '名称最多 30 个字符')
+});
+
 function setRefreshCookie(res: Response, token: string) {
   res.cookie(REFRESH_COOKIE_NAME, token, {
     httpOnly: true,
@@ -147,6 +155,22 @@ authRouter.get(
     const user = await prisma.user.findUnique({ where: { id: req.auth!.userId } });
     if (!user) throw unauthorized('用户不存在');
     res.status(200).json({ user: serializeUser(user) });
+  })
+);
+
+authRouter.patch(
+  '/me',
+  authMiddleware,
+  asyncHandler(async (req, res) => {
+    const body = profileSchema.parse(req.body);
+    const user = await prisma.user.findUnique({ where: { id: req.auth!.userId } });
+    if (!user) throw unauthorized('用户不存在');
+
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: { name: body.name }
+    });
+    res.status(200).json({ user: serializeUser(updated) });
   })
 );
 

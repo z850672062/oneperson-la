@@ -145,6 +145,65 @@ function PasswordModal({ open, onClose }: { open: boolean; onClose: () => void }
   )
 }
 
+function NameModal({ open, initial, onClose }: { open: boolean; initial: string; onClose: () => void }) {
+  const [form] = Form.useForm<{ name: string }>()
+  const updateProfile = useAuthStore((state) => state.updateProfile)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!open) return
+    form.setFieldsValue({ name: initial })
+    setError('')
+  }, [open, initial, form])
+
+  const submit = async () => {
+    let values: { name: string }
+    try {
+      values = await form.validateFields()
+    } catch {
+      return
+    }
+    setSubmitting(true)
+    try {
+      await updateProfile(values.name.trim())
+      toastSuccess('名称已更新')
+      onClose()
+    } catch (submitError) {
+      setError(apiErrorMessage(submitError))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      title="修改用户名称"
+      width={420}
+      onCancel={onClose}
+      onOk={() => void submit()}
+      okText="保存"
+      cancelText="取消"
+      confirmLoading={submitting}
+    >
+      {error ? <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} /> : null}
+      <Form form={form} layout="vertical" requiredMark={false}>
+        <Form.Item
+          label="名称"
+          name="name"
+          rules={[
+            { required: true, whitespace: true, message: '请输入名称' },
+            { max: 30, message: '最多 30 个字符' },
+          ]}
+        >
+          <Input placeholder="例如：沈律师" maxLength={30} showCount />
+        </Form.Item>
+      </Form>
+    </Modal>
+  )
+}
+
 interface ModelModalProps {
   open: boolean
   onClose: () => void
@@ -375,6 +434,7 @@ export default function Settings() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [passwordOpen, setPasswordOpen] = useState(false)
+  const [nameOpen, setNameOpen] = useState(false)
   const [devicesOpen, setDevicesOpen] = useState(false)
   const [modelOpen, setModelOpen] = useState(false)
   const [policy, setPolicy] = useState<'privacy' | 'terms' | 'third' | null>(null)
@@ -511,6 +571,14 @@ export default function Settings() {
                   <span>{user?.email || user?.username || '本地账号'}</span>
                 </div>
                 <span className="tag tag-green">已登录</span>
+              </div>
+
+              <div className="set-row">
+                <div className="set-label">
+                  <b>用户名称</b>
+                  <span>当前显示为「{displayName}」，可随时修改</span>
+                </div>
+                <Button onClick={() => setNameOpen(true)}>修改名称</Button>
               </div>
 
               <div className="set-row">
@@ -653,6 +721,11 @@ export default function Settings() {
       </div>
 
       <PasswordModal open={passwordOpen} onClose={() => setPasswordOpen(false)} />
+      <NameModal
+        open={nameOpen}
+        initial={user?.name || ''}
+        onClose={() => setNameOpen(false)}
+      />
 
       <Modal
         open={devicesOpen}

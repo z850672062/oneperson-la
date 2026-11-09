@@ -226,7 +226,7 @@ function DoStart {
     } else {
         Write-Host "`n  [DONE] Open http://localhost:$BackendPort" -ForegroundColor Green
     }
-    Write-Host "  Login: demo@legal.local / Legal1234" -ForegroundColor Yellow
+    Write-Host "  Login: OliveShen / Legal1234" -ForegroundColor Yellow
 }
 
 function DoStop {

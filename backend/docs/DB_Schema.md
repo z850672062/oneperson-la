@@ -26,7 +26,7 @@
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
 | id | TEXT | PK, cuid | 用户 ID |
-| username | TEXT | UNIQUE, NOT NULL | 登录名（种子为 `demo@legal.local`） |
+| username | TEXT | UNIQUE, NOT NULL | 登录名（种子为 `OliveShen`） |
 | name | TEXT | NOT NULL | 显示名 |
 | email | TEXT | UNIQUE, NOT NULL | 邮箱，也可作为登录名 |
 | passwordHash | TEXT | NOT NULL | bcrypt(10) 哈希，绝不返回/记录 |

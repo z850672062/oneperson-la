@@ -67,7 +67,7 @@ paths:
               type: object
               required: [username, password]
               properties:
-                username: { type: string, example: demo@legal.local, description: 用户名或邮箱 }
+                username: { type: string, example: OliveShen, description: 用户名或邮箱 }
                 password: { type: string, format: password, example: Legal1234 }
       responses:
         '200':
@@ -126,6 +126,30 @@ paths:
                 properties:
                   user: { $ref: '#/components/schemas/User' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+    patch:
+      tags: [Auth]
+      summary: 修改当前用户名称
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 30, example: 沈律师 }
+      responses:
+        '200':
+          description: 修改成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
 
   /api/auth/password:
     post:

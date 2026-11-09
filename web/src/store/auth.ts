@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { login as loginApi, logout as logoutApi, me } from '../api/auth'
+import { login as loginApi, logout as logoutApi, me, updateProfile as updateProfileApi } from '../api/auth'
 import { refreshAccessToken, setAccessToken, setSessionExpiredHandler } from '../api/client'
 import type { User } from '../types'
 
@@ -10,6 +10,7 @@ interface AuthState {
   status: AuthStatus
   bootstrap: () => Promise<void>
   login: (username: string, password: string) => Promise<void>
+  updateProfile: (name: string) => Promise<void>
   logout: () => Promise<void>
 }
 
@@ -39,6 +40,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const result = await loginApi(username, password)
     setAccessToken(result.accessToken)
     set({ user: result.user, status: 'authed' })
+  },
+
+  async updateProfile(name) {
+    const user = await updateProfileApi(name)
+    set({ user })
   },
 
   async logout() {
