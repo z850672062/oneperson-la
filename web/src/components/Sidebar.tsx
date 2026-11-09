@@ -19,7 +19,6 @@ interface SidebarProps {
 }
 
 const NAV_ITEMS = [
-  { to: '/dashboard', label: '工作汇总', icon: <DashboardOutlined /> },
   { to: '/fields', label: '字段管理', icon: <SlidersOutlined /> },
   { to: '/knowledge', label: '知识接入', icon: <BookOutlined /> },
   { to: '/chat', label: '法务对话', icon: <MessageOutlined /> },
