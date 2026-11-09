@@ -37,6 +37,8 @@ WORKDIR /app
 COPY --from=server-build /app/node_modules ./node_modules
 COPY --from=server-build /app/dist ./dist
 COPY --from=server-build /app/prisma ./prisma
+# 种子脚本 prisma/seed.ts 依赖 src 下的工具函数
+COPY --from=server-build /app/src ./src
 COPY --from=server-build /app/package.json ./package.json
 # 后端静态目录固定为 <dist>/../../web/dist，即 /web/dist
 COPY --from=web-build /app/dist /web/dist
