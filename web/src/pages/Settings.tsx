@@ -568,7 +568,7 @@ export default function Settings() {
               <div className="set-row">
                 <div className="set-label">
                   <b>{displayName}</b>
-                  <span>{user?.email || user?.username || '本地账号'}</span>
+                  <span>{user?.username || user?.email || '本地账号'}</span>
                 </div>
                 <span className="tag tag-green">已登录</span>
               </div>

@@ -15,8 +15,8 @@ import type {
 } from '@prisma/client';
 import { toDateOnly } from '../utils/date';
 
-export function serializeUser(user: Pick<User, 'id' | 'name' | 'email'>) {
-  return { id: user.id, name: user.name, email: user.email };
+export function serializeUser(user: Pick<User, 'id' | 'username' | 'name' | 'email'>) {
+  return { id: user.id, username: user.username, name: user.name, email: user.email };
 }
 
 export function serializeCategory(category: Category, recordCount: number) {

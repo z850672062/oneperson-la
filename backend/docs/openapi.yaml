@@ -1116,9 +1116,10 @@ components:
 
     User:
       type: object
-      required: [id, name, email]
+      required: [id, username, name, email]
       properties:
         id: { type: string }
+        username: { type: string, example: OliveShen }
         name: { type: string }
         email: { type: string, format: email }
 

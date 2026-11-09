@@ -1,5 +1,8 @@
 import request from 'supertest';
 import { describe, expect, it, beforeAll } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { app } from '../src/app';
 import { toDateOnly } from '../src/utils/date';
 
@@ -34,6 +37,21 @@ describe('OnePerson_LA API', () => {
     expect(cookies.some((cookie) => cookie.startsWith('la_refresh='))).toBe(true);
     expect(cookies.join(';')).toContain('HttpOnly');
     expect(cookies.join(';')).toContain('Path=/api/auth');
+  });
+
+  it('可修改当前用户名称，空名称返回 422', async () => {
+    const current = await auth(request(app).get('/api/auth/me'));
+    expect(current.status).toBe(200);
+    const original = current.body.user.name as string;
+
+    const updated = await auth(request(app).patch('/api/auth/me')).send({ name: '沈律师' });
+    expect(updated.status).toBe(200);
+    expect(updated.body.user).toMatchObject({ name: '沈律师', username: 'demo@legal.local' });
+
+    const blank = await auth(request(app).patch('/api/auth/me')).send({ name: '   ' });
+    expect(blank.status).toBe(422);
+
+    await auth(request(app).patch('/api/auth/me')).send({ name: original });
   });
 
   it('登录失败返回 401，缺少参数返回 422', async () => {
@@ -255,10 +273,14 @@ describe('OnePerson_LA API', () => {
   });
 
   it('知识库连接器、检索与记忆接口可用', async () => {
+    // 使用真实临时目录，验证索引与路径校验（路径不可访问时返回 422）
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'la-kb-'));
+    fs.writeFileSync(path.join(tmpDir, '竞业限制.md'), '# 竞业限制\n\n竞业限制期限不得超过二年。\n');
+
     const created = await auth(request(app).post('/api/kb/connectors')).send({
       name: '测试库',
       type: 'obsidian',
-      path: 'D:/not-exists-oneperson-la'
+      path: tmpDir
     });
     expect(created.status).toBe(201);
 
@@ -267,10 +289,23 @@ describe('OnePerson_LA API', () => {
     );
     expect(reindexed.status).toBe(200);
     expect(reindexed.body).toMatchObject({
-      indexed: expect.any(Number),
+      indexed: 1,
       updated: expect.any(Number),
       durationMs: expect.any(Number)
     });
+
+    const missing = await auth(request(app).post('/api/kb/connectors')).send({
+      name: '无效路径',
+      type: 'obsidian',
+      path: path.join(tmpDir, 'not-exists')
+    });
+    expect(missing.status).toBe(201);
+    const badReindex = await auth(
+      request(app).post(`/api/kb/connectors/${missing.body.connector.id}/reindex`)
+    );
+    expect(badReindex.status).toBe(422);
+
+    fs.rmSync(tmpDir, { recursive: true, force: true });
 
     const search = await auth(request(app).get('/api/kb/search').query({ q: '竞业' }));
     expect(search.status).toBe(200);
