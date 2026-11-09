@@ -1,17 +1,19 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Alert, App, Button, Input, Modal, Select, Spin } from 'antd'
-import { SendOutlined } from '@ant-design/icons'
+import { PaperClipOutlined, SendOutlined } from '@ant-design/icons'
 import { apiErrorMessage } from '../api/client'
 import {
   createSession,
   listMessages,
   listSessions,
   streamChat,
+  uploadChatAttachment,
+  type ChatAttachment,
 } from '../api/chat'
 import { listMemory, deleteMemory, clearMemory } from '../api/memory'
 import { getSettings, listModels } from '../api/settings'
-import { toastSuccess } from '../api/notify'
+import { toastError, toastSuccess } from '../api/notify'
 import { formatDateTime } from '../utils/format'
 import PageHeader from '../components/PageHeader'
 import EmptyState from '../components/EmptyState'
@@ -24,6 +26,11 @@ const SUGGESTIONS = [
   '帮我复盘一下最近的合同审查工作',
   '根据知识库起草一份催告函要点',
 ]
+
+const ATTACHMENT_ACCEPT = '.docx,.xlsx,.xls,.pdf,.md,.txt,.csv'
+const ALLOWED_EXTENSIONS = new Set(['docx', 'xlsx', 'xls', 'pdf', 'md', 'txt', 'csv'])
+const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024
+const MAX_ATTACHMENTS = 5
 
 export default function Chat() {
   const navigate = useNavigate()
@@ -47,9 +54,12 @@ export default function Chat() {
   const [memory, setMemory] = useState<MemoryItem[]>([])
   const [memoryOpen, setMemoryOpen] = useState(false)
   const [memoryLoading, setMemoryLoading] = useState(false)
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([])
+  const [uploading, setUploading] = useState(false)
 
   const abortRef = useRef<AbortController | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -113,9 +123,49 @@ export default function Chat() {
     }
   }
 
+  const handleFiles = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? [])
+    event.target.value = ''
+    if (!files.length) return
+    if (attachments.length + files.length > MAX_ATTACHMENTS) {
+      toastError(`一次最多添加 ${MAX_ATTACHMENTS} 个附件`)
+      return
+    }
+    setUploading(true)
+    const parsed: ChatAttachment[] = []
+    for (const file of files) {
+      const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+      if (ext === 'doc') {
+        toastError('暂不支持旧版 .doc 文件，请另存为 .docx 后上传')
+        continue
+      }
+      if (!ALLOWED_EXTENSIONS.has(ext)) {
+        toastError(`不支持的文件类型：${file.name}`)
+        continue
+      }
+      if (file.size > MAX_ATTACHMENT_SIZE) {
+        toastError(`${file.name} 超过 20MB 限制`)
+        continue
+      }
+      try {
+        parsed.push(await uploadChatAttachment(file))
+      } catch {
+        /* 统一错误提示 */
+      }
+    }
+    if (parsed.length) setAttachments((prev) => [...prev, ...parsed])
+    setUploading(false)
+  }
+
+  const removeAttachment = (index: number) => {
+    setAttachments((prev) => prev.filter((_, current) => current !== index))
+  }
+
   const send = async (text?: string) => {
     const content = (text ?? input).trim()
-    if (!content || !sessionId || sending) return
+    if ((!content && !attachments.length) || !sessionId || sending || uploading) return
+    const prompt = content || '请阅读并分析以下附件内容。'
+    const outgoing = attachments
 
     abortRef.current?.abort()
     const controller = new AbortController()
@@ -124,10 +174,12 @@ export default function Chat() {
     const userMessage: ChatMessage = {
       id: `local-user-${Date.now()}`,
       role: 'user',
-      content,
+      content: prompt,
+      attachments: outgoing.map((attachment) => attachment.name),
     }
     setMessages((prev) => [...prev, userMessage])
     setInput('')
+    setAttachments([])
     setSending(true)
     setError(null)
     setStreamText('')
@@ -140,7 +192,17 @@ export default function Chat() {
     try {
       await streamChat(
         sessionId,
-        { content, modelId, useKb: kbOn, useMemory: memOn, useWeb: webOn },
+        {
+          content: prompt,
+          modelId,
+          useKb: kbOn,
+          useMemory: memOn,
+          useWeb: webOn,
+          attachments: outgoing.map(({ name, text: attachmentText }) => ({
+            name,
+            text: attachmentText,
+          })),
+        },
         {
           onDelta: (delta) => {
             full += delta
@@ -219,6 +281,7 @@ export default function Chat() {
       setMessages([])
       setError(null)
       setInput('')
+      setAttachments([])
       toastSuccess('已开始新会话')
     } catch {
       /* 统一错误提示 */
@@ -376,6 +439,16 @@ export default function Chat() {
                     ) : (
                       <MarkdownDoc content={message.content} />
                     )}
+                    {message.attachments?.length ? (
+                      <div className="msg-files">
+                        {message.attachments.map((name) => (
+                          <span className="msg-file" key={`${message.id}-${name}`}>
+                            <PaperClipOutlined />
+                            {name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                     {message.citations?.length
                       ? message.citations.map((citation, index) => (
                           <span className="cite" key={`${message.id}-cite-${index}`}>
@@ -426,30 +499,71 @@ export default function Chat() {
               </div>
             ) : null}
 
-            <div className="chat-input">
-              <Input.TextArea
-                value={input}
-                autoSize={{ minRows: 2, maxRows: 4 }}
-                placeholder="描述你的问题，Enter 发送，Shift + Enter 换行"
-                aria-label="对话输入框"
-                disabled={!sessionId || loading}
-                onChange={(event) => setInput(event.target.value)}
-                onPressEnter={(event) => {
-                  if (!event.shiftKey) {
-                    event.preventDefault()
-                    void send()
-                  }
-                }}
-              />
-              <Button
-                type="primary"
-                icon={<SendOutlined />}
-                loading={sending}
-                disabled={!sessionId || !input.trim()}
-                onClick={() => void send()}
-              >
-                发送
-              </Button>
+            <div className="chat-compose">
+              {attachments.length || uploading ? (
+                <div className="chat-attach-list">
+                  {attachments.map((attachment, index) => (
+                    <span className="attach-chip" key={`${attachment.name}-${index}`}>
+                      <PaperClipOutlined />
+                      <span className="attach-name">{attachment.name}</span>
+                      {attachment.truncated ? <span className="attach-size">已截断</span> : null}
+                      <button
+                        type="button"
+                        aria-label={`移除附件 ${attachment.name}`}
+                        onClick={() => removeAttachment(index)}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                  {uploading ? (
+                    <span className="attach-chip">
+                      <Spin size="small" />
+                      解析中…
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+              <div className="chat-input">
+                <input
+                  ref={fileRef}
+                  type="file"
+                  multiple
+                  hidden
+                  accept={ATTACHMENT_ACCEPT}
+                  onChange={(event) => void handleFiles(event)}
+                />
+                <Button
+                  icon={<PaperClipOutlined />}
+                  aria-label="添加附件"
+                  title="添加附件：docx、xlsx、xls、pdf、md、txt、csv，单个不超过 20MB"
+                  disabled={!sessionId || loading || sending || uploading}
+                  onClick={() => fileRef.current?.click()}
+                />
+                <Input.TextArea
+                  value={input}
+                  autoSize={{ minRows: 2, maxRows: 4 }}
+                  placeholder="描述你的问题，Enter 发送，Shift + Enter 换行"
+                  aria-label="对话输入框"
+                  disabled={!sessionId || loading}
+                  onChange={(event) => setInput(event.target.value)}
+                  onPressEnter={(event) => {
+                    if (!event.shiftKey) {
+                      event.preventDefault()
+                      void send()
+                    }
+                  }}
+                />
+                <Button
+                  type="primary"
+                  icon={<SendOutlined />}
+                  loading={sending}
+                  disabled={!sessionId || uploading || (!input.trim() && !attachments.length)}
+                  onClick={() => void send()}
+                >
+                  发送
+                </Button>
+              </div>
             </div>
           </div>
 

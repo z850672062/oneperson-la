@@ -1,8 +1,9 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { z } from 'zod';
 import { prisma } from '../prisma';
 import { asyncHandler } from '../utils/asyncHandler';
-import { notFound } from '../utils/errors';
+import { notFound, validationError } from '../utils/errors';
 import { serializeMessage, serializeSession } from '../services/serializers';
 import {
   buildChatContext,
@@ -16,18 +17,44 @@ import {
 } from '../services/chatService';
 import { collectWebSources, type WebSource } from '../services/webSearchService';
 import { rememberFromChat } from '../services/memoryService';
+import {
+  buildAttachmentPrompt,
+  MAX_ATTACHMENT_COUNT,
+  MAX_ATTACHMENT_SIZE,
+  MAX_ATTACHMENT_TOTAL_TEXT,
+  parseAttachment
+} from '../services/attachmentService';
 
 export const chatRouter = Router();
 
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_ATTACHMENT_SIZE, files: 1 }
+});
+
 const createSessionSchema = z.object({
   model: z.string().trim().min(1).optional()
+});
+
+const attachmentSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  text: z.string().min(1)
 });
 
 const messageSchema = z.object({
   content: z.string({ required_error: 'content 必填' }).trim().min(1, '消息不能为空'),
   useKb: z.boolean().optional().default(false),
   useMemory: z.boolean().optional().default(false),
-  useWeb: z.boolean().optional().default(false)
+  useWeb: z.boolean().optional().default(false),
+  attachments: z
+    .array(attachmentSchema)
+    .max(MAX_ATTACHMENT_COUNT, `单条消息最多携带 ${MAX_ATTACHMENT_COUNT} 个附件`)
+    .refine(
+      (items) => items.reduce((total, item) => total + item.text.length, 0) <= MAX_ATTACHMENT_TOTAL_TEXT,
+      { message: '附件文本总长度超出上限，请减少附件数量或内容' }
+    )
+    .optional()
+    .default([])
 });
 
 async function defaultModel(): Promise<string> {
@@ -66,6 +93,28 @@ chatRouter.delete(
   })
 );
 
+chatRouter.post(
+  '/attachments',
+  (req, res, next) => {
+    upload.single('file')(req, res, (error: unknown) => {
+      if (!error) {
+        next();
+        return;
+      }
+      if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+        next(validationError('附件大小不能超过 20MB'));
+        return;
+      }
+      next(validationError('附件上传失败，请重试'));
+    });
+  },
+  asyncHandler(async (req, res) => {
+    if (!req.file) throw validationError('请选择要上传的附件');
+    const attachment = await parseAttachment(req.file);
+    res.status(201).json({ attachment });
+  })
+);
+
 chatRouter.get(
   '/sessions/:id/messages',
   asyncHandler(async (req, res) => {
@@ -98,6 +147,13 @@ chatRouter.post(
     });
     history.reverse();
     const messages = history.map((item) => ({ role: item.role, content: item.content }));
+    const attachmentPrompt = buildAttachmentPrompt(body.attachments);
+    if (attachmentPrompt) {
+      const last = messages[messages.length - 1];
+      if (last && last.role === 'user') {
+        last.content = `${attachmentPrompt}\n\n${last.content}`;
+      }
+    }
 
     const resolved = await resolveChatModel(session.model);
 

@@ -802,6 +802,46 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '422': { $ref: '#/components/responses/ValidationError' }
 
+  /api/chat/attachments:
+    post:
+      tags: [Chat]
+      summary: 上传并解析对话附件
+      description: |
+        支持 docx、xlsx、xls、pdf、md、txt、csv，单文件不超过 20MB。
+        服务端仅提取文本用于对话上下文，不持久化原文件；单个附件提取文本上限 12000 字符，
+        超出部分会被截断并返回 `truncated: true`。不支持旧版 .doc。
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: 解析成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attachment]
+                properties:
+                  attachment:
+                    type: object
+                    required: [name, kind, size, text, truncated]
+                    properties:
+                      name: { type: string, description: 清洗后的文件名 }
+                      kind: { type: string, description: '小写扩展名，如 docx/pdf/xlsx' }
+                      size: { type: integer, description: 原始文件字节数 }
+                      text: { type: string, description: 提取的纯文本（最多 12000 字符） }
+                      truncated: { type: boolean, description: 文本是否因超长被截断 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
   /api/chat/sessions/{id}:
     parameters:
       - $ref: '#/components/parameters/PathId'
@@ -865,6 +905,16 @@ paths:
                 useKb: { type: boolean, default: false }
                 useMemory: { type: boolean, default: false }
                 useWeb: { type: boolean, default: false, description: '是否调用 DeepSeek 联网搜索/抓取工具（仅 DeepSeek 厂商可用，按成功请求计费）' }
+                attachments:
+                  type: array
+                  maxItems: 5
+                  description: '附件解析后的纯文本（由 /api/chat/attachments 返回），仅用于本次提问的上下文'
+                  items:
+                    type: object
+                    required: [name, text]
+                    properties:
+                      name: { type: string, maxLength: 200 }
+                      text: { type: string, description: '附件纯文本，单条消息合计不超过 60000 字符' }
       responses:
         '200':
           description: SSE 事件流

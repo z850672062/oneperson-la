@@ -1078,6 +1078,78 @@ mark.search-hit {
   background: #fbfaf7;
 }
 
+.chat-compose {
+  border-top: 1px solid var(--line);
+}
+
+.chat-compose .chat-input {
+  border-top: none;
+}
+
+.chat-attach-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 14px 0;
+}
+
+.attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fbfaf7;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.attach-chip .attach-name {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attach-chip .attach-size {
+  color: var(--muted);
+}
+
+.attach-chip button {
+  border: 0;
+  padding: 0 0 0 2px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.attach-chip button:hover {
+  color: #b3261e;
+}
+
+.msg-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.msg-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.65);
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .rail {
   margin-bottom: 14px;
   padding: 16px;

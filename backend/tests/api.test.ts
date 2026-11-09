@@ -323,4 +323,36 @@ describe('OnePerson_LA API', () => {
     expect(memory.status).toBe(200);
     expect(Array.isArray(memory.body.items)).toBe(true);
   });
+
+  it('上传附件可解析文本，拒绝不支持的类型', async () => {
+    const markdown = await auth(
+      request(app)
+        .post('/api/chat/attachments')
+        .attach('file', Buffer.from('# 案件概要\n被告应于十日内答辩。', 'utf8'), {
+          filename: '案件概要.md',
+          contentType: 'text/markdown'
+        })
+    );
+    expect(markdown.status).toBe(201);
+    expect(markdown.body.attachment).toMatchObject({
+      name: '案件概要.md',
+      kind: 'md',
+      truncated: false
+    });
+    expect(markdown.body.attachment.text).toContain('十日内答辩');
+
+    const unsupported = await auth(
+      request(app)
+        .post('/api/chat/attachments')
+        .attach('file', Buffer.from('binary'), { filename: 'app.exe' })
+    );
+    expect(unsupported.status).toBe(422);
+
+    const legacyDoc = await auth(
+      request(app)
+        .post('/api/chat/attachments')
+        .attach('file', Buffer.from('legacy'), { filename: '旧版.doc' })
+    );
+    expect(legacyDoc.status).toBe(422);
+  });
 });

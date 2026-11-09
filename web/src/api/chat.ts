@@ -67,12 +67,28 @@ export async function listMessages(sessionId: string): Promise<ChatMessage[]> {
   return asItems(data).map(normalizeMessage)
 }
 
+export interface ChatAttachment {
+  name: string
+  kind: string
+  size: number
+  text: string
+  truncated: boolean
+}
+
 export interface ChatSendPayload {
   content: string
   modelId?: string | null
   useKb: boolean
   useMemory: boolean
   useWeb?: boolean
+  attachments?: Array<{ name: string; text: string }>
+}
+
+export async function uploadChatAttachment(file: File): Promise<ChatAttachment> {
+  const form = new FormData()
+  form.append('file', file)
+  const { data } = await api.post<{ attachment: ChatAttachment }>('/chat/attachments', form)
+  return data.attachment
 }
 
 export interface StreamHandlers {
