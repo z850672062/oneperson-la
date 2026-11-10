@@ -28,6 +28,24 @@ const SUGGESTIONS = [
 ]
 
 const ATTACHMENT_ACCEPT = '.docx,.xlsx,.xls,.pdf,.md,.txt,.csv'
+
+/**
+ * 把回复里的纯文本标注转成可点击 markdown 链接：
+ * 1) 裸 URL → [url](url)（autolink）
+ * 2) [网络N] → [网络N](citations[N-1].url)（联网检索来源）
+ * 没有 url 的标注保持原样，避免生成坏链接。
+ */
+function enrichAnswer(text: string, citations?: Citation[]): string {
+  if (!text) return text
+  let out = text
+  out = out.replace(/(?<!\()(https?:\/\/[^\s)\]>]+)(?!\))/g, (m) => `[${m}](${m})`)
+  out = out.replace(/\[网络(\d+)\]/g, (_m, n: string) => {
+    const idx = Number(n) - 1
+    const url = citations?.[idx]?.url
+    return url ? `[网络${n}](${url})` : _m
+  })
+  return out
+}
 const ALLOWED_EXTENSIONS = new Set(['docx', 'xlsx', 'xls', 'pdf', 'md', 'txt', 'csv'])
 const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024
 const MAX_ATTACHMENTS = 5
@@ -437,7 +455,7 @@ export default function Chat() {
                     {message.role === 'user' ? (
                       message.content
                     ) : (
-                      <MarkdownDoc content={message.content} />
+                      <MarkdownDoc content={enrichAnswer(message.content, message.citations)} />
                     )}
                     {message.attachments?.length ? (
                       <div className="msg-files">
@@ -450,11 +468,23 @@ export default function Chat() {
                       </div>
                     ) : null}
                     {message.citations?.length
-                      ? message.citations.map((citation, index) => (
-                          <span className="cite" key={`${message.id}-cite-${index}`}>
-                            {citation.title}
-                          </span>
-                        ))
+                      ? message.citations.map((citation, index) =>
+                          citation.url ? (
+                            <a
+                              className="cite cite-link"
+                              key={`${message.id}-cite-${index}`}
+                              href={citation.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              {citation.title}
+                            </a>
+                          ) : (
+                            <span className="cite" key={`${message.id}-cite-${index}`}>
+                              {citation.title}
+                            </span>
+                          )
+                        )
                       : null}
                   </div>
                   <div className="msg-meta">
@@ -468,7 +498,7 @@ export default function Chat() {
                 <div className="msg msg-ai">
                   <div className="bubble">
                     {streamText ? (
-                      <MarkdownDoc content={streamText} />
+                      <MarkdownDoc content={enrichAnswer(streamText, streamCitations)} />
                     ) : (
                       <span className="typing" aria-label="正在生成回答">
                         <span />
@@ -476,11 +506,23 @@ export default function Chat() {
                         <span />
                       </span>
                     )}
-                    {streamCitations.map((citation, index) => (
-                      <span className="cite" key={`stream-cite-${index}`}>
-                        {citation.title}
-                      </span>
-                    ))}
+                    {streamCitations.map((citation, index) =>
+                      citation.url ? (
+                        <a
+                          className="cite cite-link"
+                          key={`stream-cite-${index}`}
+                          href={citation.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {citation.title}
+                        </a>
+                      ) : (
+                        <span className="cite" key={`stream-cite-${index}`}>
+                          {citation.title}
+                        </span>
+                      )
+                    )}
                   </div>
                   <div className="msg-meta">正在生成…</div>
                 </div>

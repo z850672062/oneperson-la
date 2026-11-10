@@ -150,6 +150,10 @@ export interface Citation {
   id?: string
   docId?: string
   title: string
+  /** 网络来源为 http(s) URL；Obsidian 为本地绝对路径（容器内）；IMA 暂缺 */
+  url?: string
+  /** 来源类型 */
+  source?: 'web' | 'obsidian' | 'ima' | 'unknown'
 }
 
 export interface ChatSession {

@@ -1030,6 +1030,19 @@ mark.search-hit {
   font-size: 11px;
 }
 
+.cite-link {
+  text-decoration: none;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.cite-link:hover {
+  background: var(--green);
+  color: #fff;
+  border-color: var(--green);
+}
+
 .typing span {
   display: inline-block;
   width: 5px;

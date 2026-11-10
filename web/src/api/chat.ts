@@ -27,10 +27,20 @@ export function normalizeCitations(raw: unknown): Citation[] {
     const obj = item as Record<string, unknown>
     const title = obj.title ?? obj.name ?? obj.label
     if (title == null) return
+    const rawUrl = obj.url ?? obj.path
+    const url = typeof rawUrl === 'string' && /^https?:\/\//i.test(rawUrl) ? rawUrl : undefined
+    const idStr = obj.id != null ? String(obj.id) : String(index)
+    let source: Citation['source'] = 'unknown'
+    const idLower = idStr.toLowerCase()
+    if (idLower.startsWith('web-') || url) source = 'web'
+    else if (idLower.startsWith('ima') || String(obj.title ?? '').includes('[IMA]')) source = 'ima'
+    else source = 'obsidian'
     result.push({
-      id: obj.id != null ? String(obj.id) : String(index),
+      id: idStr,
       docId: obj.docId != null ? String(obj.docId) : obj.id != null ? String(obj.id) : undefined,
       title: String(title),
+      url,
+      source,
     })
   })
   return result
