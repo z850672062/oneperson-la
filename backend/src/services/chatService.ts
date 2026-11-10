@@ -25,6 +25,23 @@ export interface ChatContext {
   memory: string[];
 }
 
+/** 传给 LLM 的 content block（OpenAI 兼容） */
+export type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string; detail?: 'low' | 'high' | 'original' | 'auto' } }
+  | { type: 'tool_use'; id: string; name: string; input: unknown }
+  | { type: 'tool_result'; tool_use_id: string; content: string };
+
+/** 一条 LLM message：content 既可以是纯字符串（text-only），也可以是 block 数组（Vision/Tool） */
+export interface ChatMessageBlock {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string | ContentBlock[];
+  /** 仅 role=assistant 且有 tool call 时 */
+  tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>;
+  /** role=tool 时必填 */
+  tool_call_id?: string;
+}
+
 export function sseWrite(res: Response, event: string, data: unknown): void {
   if (res.writableEnded || res.destroyed) return;
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -155,22 +172,32 @@ export async function resolveChatModel(sessionModel: string): Promise<ResolvedMo
 export async function streamChatCompletion(
   resolved: ResolvedModel,
   systemPrompt: string,
-  history: Array<{ role: string; content: string }>,
-  res: Response
-): Promise<{ text: string; forwarded: number }> {
+  history: ChatMessageBlock[],
+  res: Response,
+  tools?: unknown[]
+): Promise<{ text: string; forwarded: number; finalToolCalls: Array<{ id: string; name: string; arguments: string }> }> {
   const endpoint = chatCompletionsUrl(resolved.baseUrl, resolved.vendor);
+  const messages: ChatMessageBlock[] = [{ role: 'system', content: systemPrompt }, ...history];
+
+  const body: Record<string, unknown> = {
+    model: resolved.model,
+    stream: true,
+    temperature: 0.4,
+    messages
+  };
+  if (tools?.length) {
+    body.tools = tools;
+    // 思考模式的模型不支持 temperature，但我们当前默认 temperature=0.4；有 tools 时降为 0.1 让模型更稳定
+    body.temperature = 0.1;
+  }
+
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${resolved.apiKey}`
     },
-    body: JSON.stringify({
-      model: resolved.model,
-      stream: true,
-      temperature: 0.4,
-      messages: [{ role: 'system', content: systemPrompt }, ...history]
-    })
+    body: JSON.stringify(body)
   });
 
   if (!response.ok || !response.body) {
@@ -183,6 +210,11 @@ export async function streamChatCompletion(
   let buffer = '';
   let text = '';
   let forwarded = 0;
+  // tool_calls 增量组装
+  const toolCallMap = new Map<
+    number,
+    { id?: string; name?: string; argumentsBuf: string }
+  >();
 
   for (;;) {
     const { done, value } = await reader.read();
@@ -197,13 +229,36 @@ export async function streamChatCompletion(
       if (!payload || payload === '[DONE]') continue;
       try {
         const parsed = JSON.parse(payload) as {
-          choices?: Array<{ delta?: { content?: string } }>;
+          choices?: Array<{
+            delta?: {
+              content?: string;
+              tool_calls?: Array<{
+                index: number;
+                id?: string;
+                function?: { name?: string; arguments?: string };
+              }>;
+            };
+          }>;
         };
-        const delta = parsed.choices?.[0]?.delta?.content;
-        if (delta) {
-          text += delta;
+        const choice = parsed.choices?.[0];
+        if (!choice?.delta) continue;
+
+        const deltaText = choice.delta.content;
+        if (deltaText) {
+          text += deltaText;
           forwarded += 1;
-          sseWrite(res, 'delta', { text: delta });
+          sseWrite(res, 'delta', { text: deltaText });
+        }
+
+        const deltaTools = choice.delta.tool_calls;
+        if (deltaTools?.length) {
+          for (const tc of deltaTools) {
+            const slot = toolCallMap.get(tc.index) ?? { argumentsBuf: '' };
+            if (tc.id) slot.id = tc.id;
+            if (tc.function?.name) slot.name = tc.function.name;
+            if (tc.function?.arguments) slot.argumentsBuf += tc.function.arguments;
+            toolCallMap.set(tc.index, slot);
+          }
         }
       } catch {
         // 忽略无法解析的心跳/空行
@@ -211,7 +266,13 @@ export async function streamChatCompletion(
     }
   }
 
-  return { text, forwarded };
+  const finalToolCalls = Array.from(toolCallMap.values()).map((slot) => ({
+    id: slot.id ?? `tc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: slot.name ?? 'unknown',
+    arguments: slot.argumentsBuf || '{}'
+  }));
+
+  return { text, forwarded, finalToolCalls };
 }
 
 export function buildSystemPrompt(

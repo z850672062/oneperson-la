@@ -13,11 +13,13 @@ import {
   sseWrite,
   streamChatCompletion,
   streamMockAnswer,
+  type ChatMessageBlock,
   type Citation
 } from '../services/chatService';
 import { collectWebSources, type WebSource } from '../services/webSearchService';
 import { rememberFromChat } from '../services/memoryService';
 import { redactSensitive } from '../utils/redact';
+import { executeToolCall, TOOLS_SCHEMA } from '../services/toolsService';
 import {
   buildAttachmentPrompt,
   MAX_ATTACHMENT_COUNT,
@@ -42,6 +44,17 @@ const attachmentSchema = z.object({
   text: z.string().min(1)
 });
 
+const imageSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  /** base64 data URL：data:image/jpeg;base64,... */
+  dataUrl: z
+    .string()
+    .trim()
+    .startsWith('data:image/', { message: '图片必须以 data:image/...;base64,... 格式传入' })
+    .regex(/^data:image\/(jpeg|png|gif|webp);base64,[A-Za-z0-9+/=]+$/, '仅支持 JPEG、PNG、GIF、WebP 格式')
+    .max(15 * 1024 * 1024, '单张图片 base64 编码后不得超过 15MB')
+});
+
 const messageSchema = z.object({
   content: z.string({ required_error: 'content 必填' }).trim().min(1, '消息不能为空'),
   useKb: z.boolean().optional().default(false),
@@ -55,7 +68,8 @@ const messageSchema = z.object({
       { message: '附件文本总长度超出上限，请减少附件数量或内容' }
     )
     .optional()
-    .default([])
+    .default([]),
+  images: z.array(imageSchema).max(4, '单条消息最多携带 4 张图片').optional().default([])
 });
 
 async function defaultModel(): Promise<string> {
@@ -155,8 +169,8 @@ chatRouter.post(
 
     // 脱敏：发往模型前替换 PII，数据库中保留原文
     const outgoingContent = maskSensitive ? redactSensitive(body.content) : body.content;
-    const messages = history.map((item) => ({
-      role: item.role,
+    const messages: ChatMessageBlock[] = history.map((item) => ({
+      role: item.role as ChatMessageBlock['role'],
       content: maskSensitive ? redactSensitive(item.content) : item.content
     }));
     if (maskSensitive) {
@@ -168,8 +182,26 @@ chatRouter.post(
     const outgoingAttachmentPrompt = maskSensitive && attachmentPrompt ? redactSensitive(attachmentPrompt) : attachmentPrompt;
     if (outgoingAttachmentPrompt) {
       const last = messages[messages.length - 1];
-      if (last && last.role === 'user') {
+      if (last && last.role === 'user' && typeof last.content === 'string') {
         last.content = `${outgoingAttachmentPrompt}\n\n${last.content}`;
+      }
+    }
+
+    // Vision：如果带图片，把最后一个 user 消息的 content 改成 block 数组
+    if (body.images?.length) {
+      const last = messages[messages.length - 1];
+      const prevText = last && last.role === 'user' && typeof last.content === 'string' ? last.content : outgoingContent;
+      const blocks: ChatMessageBlock['content'] = [
+        { type: 'text', text: prevText },
+        ...body.images.map((img) => ({
+          type: 'image_url' as const,
+          image_url: { url: img.dataUrl, detail: 'auto' as const }
+        }))
+      ];
+      if (last && last.role === 'user') {
+        last.content = blocks;
+      } else {
+        messages.push({ role: 'user', content: blocks });
       }
     }
 
@@ -215,14 +247,64 @@ chatRouter.post(
     try {
       if (resolved) {
         try {
-          const upstream = await streamChatCompletion(
-            resolved,
-            buildSystemPrompt(context, resolved, webSources),
-            messages,
-            res
-          );
-          answerText += upstream.text;
-          if (!upstream.text) {
+          const systemPrompt = buildSystemPrompt(context, resolved, webSources);
+
+          // 工具调用多轮循环：最多 5 轮防止死循环
+          const MAX_TOOL_ROUNDS = 5;
+          let round = 0;
+          while (round < MAX_TOOL_ROUNDS) {
+            round += 1;
+            const upstream = await streamChatCompletion(
+              resolved,
+              systemPrompt,
+              messages,
+              res,
+              TOOLS_SCHEMA
+            );
+
+            answerText += upstream.text;
+
+            if (!upstream.finalToolCalls.length) {
+              // 模型返回纯文本，工具调用结束
+              break;
+            }
+
+            // 把本轮 assistant message（带 tool_calls）追加进 messages，供后续轮次使用
+            messages.push({
+              role: 'assistant',
+              content: upstream.text || '',
+              tool_calls: upstream.finalToolCalls.map((tc) => ({
+                id: tc.id,
+                type: 'function',
+                function: { name: tc.name, arguments: tc.arguments }
+              }))
+            });
+
+            // 执行每个 tool_call
+            for (const call of upstream.finalToolCalls) {
+              sseWrite(res, 'tool_call', { id: call.id, name: call.name, arguments: call.arguments });
+              const result = await executeToolCall(call);
+              if (result.ok) {
+                sseWrite(res, 'tool_result', { id: call.id, name: call.name, content: result.content });
+              } else {
+                sseWrite(res, 'tool_error', { id: call.id, name: call.name, error: result.error ?? '未知错误' });
+              }
+              // tool_result 加入 messages
+              messages.push({
+                role: 'tool',
+                tool_call_id: call.id,
+                content: result.ok ? result.content : `工具执行失败：${result.error ?? '未知错误'}`
+              });
+            }
+
+            // 给模型发一条说明：刚刚执行了哪些工具
+            sseWrite(res, 'delta', {
+              text: `\n\n> （已调用 ${upstream.finalToolCalls.map((c) => c.name).join(', ')}，正在整合结果…）\n\n`
+            });
+            answerText += `\n\n> （已调用 ${upstream.finalToolCalls.map((c) => c.name).join(', ')}，正在整合结果…）\n\n`;
+          }
+
+          if (!answerText.trim()) {
             const notice = `> 模型 ${resolved.model} 未返回内容，以下为内置示例回复。\n\n`;
             sseWrite(res, 'delta', { text: notice });
             const fallback = buildMockAnswer(body.content, { ...context, citations });

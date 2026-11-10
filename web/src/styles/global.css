@@ -1144,6 +1144,55 @@ mark.search-hit {
   color: #b3261e;
 }
 
+.attach-chip.attach-img img {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+/* 工具调用历史 */
+.tool-history {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.tool-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.tool-pill .tool-icon {
+  font-size: 12px;
+}
+
+.tool-pill.tool-call {
+  background: #f0f7ff;
+  border: 1px solid #b8d5f5;
+  color: #2b5e9e;
+}
+
+.tool-pill.tool-result {
+  background: #f0faf0;
+  border: 1px solid #b8e0b8;
+  color: #2e7d32;
+}
+
+.tool-pill.tool-error {
+  background: #fdf0ef;
+  border: 1px solid #f3b6b1;
+  color: #c62828;
+}
+
 .msg-files {
   display: flex;
   flex-wrap: wrap;

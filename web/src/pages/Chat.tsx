@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Alert, App, Button, Input, Modal, Select, Spin } from 'antd'
-import { PaperClipOutlined, SendOutlined } from '@ant-design/icons'
+import { PaperClipOutlined, PictureOutlined, SendOutlined } from '@ant-design/icons'
 import { apiErrorMessage } from '../api/client'
 import {
   createSession,
@@ -10,6 +10,8 @@ import {
   streamChat,
   uploadChatAttachment,
   type ChatAttachment,
+  type ToolCallInfo,
+  type ToolResultInfo,
 } from '../api/chat'
 import { listMemory, deleteMemory, clearMemory } from '../api/memory'
 import { getSettings, listModels } from '../api/settings'
@@ -28,6 +30,9 @@ const SUGGESTIONS = [
 ]
 
 const ATTACHMENT_ACCEPT = '.docx,.xlsx,.xls,.pdf,.md,.txt,.csv'
+const IMAGE_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp'
+const MAX_IMAGES = 4
+const MAX_IMAGE_SIZE = 15 * 1024 * 1024
 
 /**
  * 把回复里的纯文本标注转成可点击 markdown 链接：
@@ -74,10 +79,15 @@ export default function Chat() {
   const [memoryLoading, setMemoryLoading] = useState(false)
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const [uploading, setUploading] = useState(false)
+  const [images, setImages] = useState<Array<{ name: string; dataUrl: string }>>([])
+  const [streamToolCalls, setStreamToolCalls] = useState<
+    Array<{ kind: 'call' | 'result' | 'error'; call: ToolCallInfo; result?: ToolResultInfo }>
+  >([])
 
   const abortRef = useRef<AbortController | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const imageRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -179,10 +189,43 @@ export default function Chat() {
     setAttachments((prev) => prev.filter((_, current) => current !== index))
   }
 
+  const handleImages = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? [])
+    event.target.value = ''
+    if (!files.length) return
+    if (images.length + files.length > MAX_IMAGES) {
+      toastError(`一次最多添加 ${MAX_IMAGES} 张图片`)
+      return
+    }
+    const parsed: Array<{ name: string; dataUrl: string }> = []
+    for (const file of files) {
+      if (file.size > MAX_IMAGE_SIZE) {
+        toastError(`${file.name} 超过 15MB 限制`)
+        continue
+      }
+      if (!IMAGE_ACCEPT.includes(file.type)) {
+        toastError(`不支持的图片类型：${file.name}`)
+        continue
+      }
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      }).catch(() => '')
+      if (dataUrl) parsed.push({ name: file.name, dataUrl })
+    }
+    if (parsed.length) setImages((prev) => [...prev, ...parsed])
+  }
+
+  const removeImage = (index: number) => {
+    setImages((prev) => prev.filter((_, current) => current !== index))
+  }
+
   const send = async (text?: string) => {
     const content = (text ?? input).trim()
-    if ((!content && !attachments.length) || !sessionId || sending || uploading) return
-    const prompt = content || '请阅读并分析以下附件内容。'
+    if ((!content && !attachments.length && !images.length) || !sessionId || sending || uploading) return
+    const prompt = content || '请帮我查看这张图片。'
     const outgoing = attachments
 
     abortRef.current?.abort()
@@ -194,18 +237,22 @@ export default function Chat() {
       role: 'user',
       content: prompt,
       attachments: outgoing.map((attachment) => attachment.name),
+      images: images.map((img) => img.name),
     }
     setMessages((prev) => [...prev, userMessage])
     setInput('')
     setAttachments([])
+    setImages([])
     setSending(true)
     setError(null)
     setStreamText('')
     setStreamCitations([])
+    setStreamToolCalls([])
 
     let full = ''
     let citations: Citation[] = []
     let finished = false
+    const toolHistory: Array<{ kind: 'call' | 'result' | 'error'; call: ToolCallInfo; result?: ToolResultInfo }> = []
 
     try {
       await streamChat(
@@ -220,6 +267,7 @@ export default function Chat() {
             name,
             text: attachmentText,
           })),
+          images: images.map((img) => ({ name: img.name, dataUrl: img.dataUrl })),
         },
         {
           onDelta: (delta) => {
@@ -229,6 +277,21 @@ export default function Chat() {
           onCitations: (next) => {
             citations = next
             setStreamCitations(next)
+          },
+          onToolCall: (info) => {
+            const entry = { kind: 'call' as const, call: info }
+            toolHistory.push(entry)
+            setStreamToolCalls([...toolHistory])
+          },
+          onToolResult: (info) => {
+            const entry = { kind: 'result' as const, call: info, result: info }
+            toolHistory.push(entry)
+            setStreamToolCalls([...toolHistory])
+          },
+          onToolError: (info) => {
+            const entry = { kind: 'error' as const, call: info, result: info }
+            toolHistory.push(entry)
+            setStreamToolCalls([...toolHistory])
           },
           onDone: () => {
             finished = true
@@ -467,6 +530,16 @@ export default function Chat() {
                         ))}
                       </div>
                     ) : null}
+                    {message.images?.length ? (
+                      <div className="msg-files">
+                        {message.images.map((name) => (
+                          <span className="msg-file" key={`${message.id}-img-${name}`}>
+                            <PictureOutlined />
+                            {name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                     {message.citations?.length
                       ? message.citations.map((citation, index) =>
                           citation.url ? (
@@ -497,6 +570,28 @@ export default function Chat() {
               {sending ? (
                 <div className="msg msg-ai">
                   <div className="bubble">
+                    {streamToolCalls.length ? (
+                      <div className="tool-history">
+                        {streamToolCalls.map((entry, index) =>
+                          entry.kind === 'call' ? (
+                            <div className="tool-pill tool-call" key={`tc-${index}`}>
+                              <span className="tool-icon">🔧</span>
+                              {entry.call.name}(…)
+                            </div>
+                          ) : entry.kind === 'error' ? (
+                            <div className="tool-pill tool-error" key={`tc-${index}`}>
+                              <span className="tool-icon">⚠️</span>
+                              {entry.call.name}：{entry.result?.error ?? '执行失败'}
+                            </div>
+                          ) : (
+                            <div className="tool-pill tool-result" key={`tc-${index}`}>
+                              <span className="tool-icon">✓</span>
+                              {entry.call.name}
+                            </div>
+                          )
+                        )}
+                      </div>
+                    ) : null}
                     {streamText ? (
                       <MarkdownDoc content={enrichAnswer(streamText, streamCitations)} />
                     ) : (
@@ -542,7 +637,7 @@ export default function Chat() {
             ) : null}
 
             <div className="chat-compose">
-              {attachments.length || uploading ? (
+              {(attachments.length || images.length || uploading) ? (
                 <div className="chat-attach-list">
                   {attachments.map((attachment, index) => (
                     <span className="attach-chip" key={`${attachment.name}-${index}`}>
@@ -553,6 +648,19 @@ export default function Chat() {
                         type="button"
                         aria-label={`移除附件 ${attachment.name}`}
                         onClick={() => removeAttachment(index)}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                  {images.map((img, index) => (
+                    <span className="attach-chip attach-img" key={`${img.name}-${index}`}>
+                      <img src={img.dataUrl} alt={img.name} />
+                      <span className="attach-name">{img.name}</span>
+                      <button
+                        type="button"
+                        aria-label={`移除图片 ${img.name}`}
+                        onClick={() => removeImage(index)}
                       >
                         ×
                       </button>
@@ -575,12 +683,27 @@ export default function Chat() {
                   accept={ATTACHMENT_ACCEPT}
                   onChange={(event) => void handleFiles(event)}
                 />
+                <input
+                  ref={imageRef}
+                  type="file"
+                  multiple
+                  hidden
+                  accept={IMAGE_ACCEPT}
+                  onChange={(event) => void handleImages(event)}
+                />
                 <Button
                   icon={<PaperClipOutlined />}
                   aria-label="添加附件"
                   title="添加附件：docx、xlsx、xls、pdf、md、txt、csv，单个不超过 20MB"
                   disabled={!sessionId || loading || sending || uploading}
                   onClick={() => fileRef.current?.click()}
+                />
+                <Button
+                  icon={<PictureOutlined />}
+                  aria-label="添加图片"
+                  title="添加图片进行视觉理解：JPEG、PNG、GIF、WebP，单张不超过 15MB，最多 4 张"
+                  disabled={!sessionId || loading || sending || images.length >= MAX_IMAGES}
+                  onClick={() => imageRef.current?.click()}
                 />
                 <Input.TextArea
                   value={input}
@@ -600,7 +723,7 @@ export default function Chat() {
                   type="primary"
                   icon={<SendOutlined />}
                   loading={sending}
-                  disabled={!sessionId || uploading || (!input.trim() && !attachments.length)}
+                  disabled={!sessionId || uploading || (!input.trim() && !attachments.length && !images.length)}
                   onClick={() => void send()}
                 >
                   发送

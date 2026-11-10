@@ -92,6 +92,30 @@ export interface ChatSendPayload {
   useMemory: boolean
   useWeb?: boolean
   attachments?: Array<{ name: string; text: string }>
+  images?: Array<{ name: string; dataUrl: string }>
+}
+
+export interface ToolCallInfo {
+  id: string
+  name: string
+  arguments?: string
+}
+
+export interface ToolResultInfo {
+  id: string
+  name: string
+  content: string
+  error?: string
+}
+
+export interface StreamHandlers {
+  onDelta: (text: string) => void
+  onCitations: (citations: Citation[]) => void
+  onDone: () => void
+  onError: (message: string) => void
+  onToolCall?: (info: ToolCallInfo) => void
+  onToolResult?: (info: ToolResultInfo) => void
+  onToolError?: (info: ToolResultInfo) => void
 }
 
 export async function uploadChatAttachment(file: File): Promise<ChatAttachment> {
@@ -212,6 +236,34 @@ export async function streamChat(
     }
     if (parsed.event === 'citations') {
       handlers.onCitations(normalizeCitations(data))
+      return
+    }
+    if (parsed.event === 'tool_call' && data && typeof data === 'object') {
+      const obj = data as Record<string, unknown>
+      handlers.onToolCall?.({
+        id: String(obj.id ?? ''),
+        name: String(obj.name ?? ''),
+        arguments: String(obj.arguments ?? '{}'),
+      })
+      return
+    }
+    if (parsed.event === 'tool_result' && data && typeof data === 'object') {
+      const obj = data as Record<string, unknown>
+      handlers.onToolResult?.({
+        id: String(obj.id ?? ''),
+        name: String(obj.name ?? ''),
+        content: String(obj.content ?? ''),
+      })
+      return
+    }
+    if (parsed.event === 'tool_error' && data && typeof data === 'object') {
+      const obj = data as Record<string, unknown>
+      handlers.onToolError?.({
+        id: String(obj.id ?? ''),
+        name: String(obj.name ?? ''),
+        content: String(obj.content ?? ''),
+        error: String(obj.error ?? ''),
+      })
       return
     }
     if (parsed.event === 'error') {

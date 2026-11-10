@@ -170,6 +170,8 @@ export interface ChatMessage {
   citations?: Citation[]
   /** 本地消息附带的附件名称（仅当次发送展示） */
   attachments?: string[]
+  /** 本地消息附带的图片名称（仅当次发送展示） */
+  images?: string[]
   createdAt?: string
 }
 
