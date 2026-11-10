@@ -17,6 +17,7 @@ import {
 } from '../services/chatService';
 import { collectWebSources, type WebSource } from '../services/webSearchService';
 import { rememberFromChat } from '../services/memoryService';
+import { redactSensitive } from '../utils/redact';
 import {
   buildAttachmentPrompt,
   MAX_ATTACHMENT_COUNT,
@@ -135,9 +136,14 @@ chatRouter.post(
     const session = await prisma.chatSession.findUnique({ where: { id: req.params.id } });
     if (!session) throw notFound('会话不存在');
 
-    await prisma.chatMessage.create({
-      data: { sessionId: session.id, role: 'user', content: body.content }
-    });
+    const [setting] = await Promise.all([
+      prisma.setting.findUnique({ where: { id: 'default' } }).catch(() => null),
+      prisma.chatMessage.create({
+        data: { sessionId: session.id, role: 'user', content: body.content }
+      })
+    ]);
+    const maskSensitive = Boolean(setting?.maskSensitive);
+    const maskLlm = Boolean(setting?.maskLlm);
 
     const context = await buildChatContext(body.content, body.useKb, body.useMemory);
     const history = await prisma.chatMessage.findMany({
@@ -146,12 +152,24 @@ chatRouter.post(
       take: 12
     });
     history.reverse();
-    const messages = history.map((item) => ({ role: item.role, content: item.content }));
+
+    // 脱敏：发往模型前替换 PII，数据库中保留原文
+    const outgoingContent = maskSensitive ? redactSensitive(body.content) : body.content;
+    const messages = history.map((item) => ({
+      role: item.role,
+      content: maskSensitive ? redactSensitive(item.content) : item.content
+    }));
+    if (maskSensitive) {
+      for (const doc of context.docs) doc.excerpt = redactSensitive(doc.excerpt);
+      context.memory = context.memory.map((item) => redactSensitive(item));
+    }
+
     const attachmentPrompt = buildAttachmentPrompt(body.attachments);
-    if (attachmentPrompt) {
+    const outgoingAttachmentPrompt = maskSensitive && attachmentPrompt ? redactSensitive(attachmentPrompt) : attachmentPrompt;
+    if (outgoingAttachmentPrompt) {
       const last = messages[messages.length - 1];
       if (last && last.role === 'user') {
-        last.content = `${attachmentPrompt}\n\n${last.content}`;
+        last.content = `${outgoingAttachmentPrompt}\n\n${last.content}`;
       }
     }
 
@@ -165,7 +183,9 @@ chatRouter.post(
         webError = `当前模型厂商为 ${resolved.vendor}，暂不支持 DeepSeek 联网工具，已跳过联网检索`;
       } else {
         const collected = await collectWebSources(body.content, resolved.apiKey);
-        webSources = collected.sources;
+        webSources = maskSensitive
+          ? collected.sources.map((item) => ({ ...item, summary: redactSensitive(item.summary) }))
+          : collected.sources;
         webError = collected.error || '';
       }
     }
@@ -231,11 +251,14 @@ chatRouter.post(
         await streamMockAnswer(res, answerText.slice(notice.length));
       }
 
+      // maskLlm：对模型最终回复里的敏感信息再做一层脱敏后入库
+      const finalAnswer = maskLlm ? redactSensitive(answerText) : answerText;
+
       const assistant = await prisma.chatMessage.create({
         data: {
           sessionId: session.id,
           role: 'assistant',
-          content: answerText,
+          content: finalAnswer,
           citationsJson: JSON.stringify(citations)
         }
       });
