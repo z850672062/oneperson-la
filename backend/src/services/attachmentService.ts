@@ -12,6 +12,8 @@ export const MAX_ATTACHMENT_TEXT = 12000;
 export const MAX_ATTACHMENT_COUNT = 5;
 /** 单条消息附件文本合计上限（字符） */
 export const MAX_ATTACHMENT_TOTAL_TEXT = 60000;
+/** 知识库单个文件入库文本上限（字符），超出部分截断 */
+export const MAX_KB_DOCUMENT_TEXT = 200000;
 
 const SUPPORTED_EXTENSIONS = new Set(['docx', 'xlsx', 'xls', 'pdf', 'md', 'txt', 'csv']);
 const MAX_EXCEL_SHEETS = 20;
@@ -140,6 +142,38 @@ export async function parseAttachment(file: Express.Multer.File): Promise<Parsed
     kind: ext,
     size: file.size,
     text: truncated ? text.slice(0, MAX_ATTACHMENT_TEXT) : text,
+    truncated
+  };
+}
+
+/** 从本地文件内容中提取文本，供知识库索引使用 */
+export async function extractDocumentText(
+  fileName: string,
+  buffer: Buffer
+): Promise<{ text: string; truncated: boolean }> {
+  const ext = assertSupportedAttachment(fileName);
+  let rawText = '';
+  try {
+    rawText = await extractText(ext, buffer);
+  } catch (error) {
+    if (error instanceof Error && /password/i.test(error.message)) {
+      throw validationError('该 PDF 已加密，无法建立索引');
+    }
+    throw validationError(`文件「${path.basename(fileName)}」解析失败，请确认文件未损坏`);
+  }
+
+  const text = normalizeText(rawText);
+  if (!text) {
+    throw validationError(
+      ext === 'pdf'
+        ? '未能从 PDF 中提取到文本，可能是扫描件，无法建立索引'
+        : '文件中没有可提取的文本内容'
+    );
+  }
+
+  const truncated = text.length > MAX_KB_DOCUMENT_TEXT;
+  return {
+    text: truncated ? text.slice(0, MAX_KB_DOCUMENT_TEXT) : text,
     truncated
   };
 }

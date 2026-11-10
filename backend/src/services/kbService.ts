@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { prisma } from '../prisma';
 import { validationError } from '../utils/errors';
+import { extractDocumentText } from './attachmentService';
 import {
   listImaKnowledgeBases,
   parseImaConfig,
@@ -202,11 +203,17 @@ export async function searchKb(rawQuery: string): Promise<{ items: KbSearchResul
   return { items, took: Date.now() - startedAt };
 }
 
-function collectMarkdownFiles(target: string): string[] {
+const INDEXABLE_EXTENSIONS = new Set(['md', 'pdf', 'docx']);
+
+function isIndexableFile(fileName: string): boolean {
+  return INDEXABLE_EXTENSIONS.has(path.extname(fileName).slice(1).toLowerCase());
+}
+
+function collectIndexableFiles(target: string): string[] {
   const files: string[] = [];
   const stat = fs.statSync(target);
   if (stat.isFile()) {
-    return target.toLowerCase().endsWith('.md') ? [target] : [];
+    return isIndexableFile(target) ? [target] : [];
   }
   if (!stat.isDirectory()) return [];
 
@@ -219,7 +226,7 @@ function collectMarkdownFiles(target: string): string[] {
       const fullPath = path.join(current, entry.name);
       if (entry.isDirectory()) {
         stack.push(fullPath);
-      } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
+      } else if (entry.isFile() && isIndexableFile(entry.name)) {
         files.push(fullPath);
       }
     }
@@ -275,12 +282,27 @@ export async function reindexConnector(connectorId: string) {
   let updated = 0;
 
   if (connector.path && fs.existsSync(connector.path)) {
-    const files = collectMarkdownFiles(connector.path);
-    indexed = files.length;
+    const files = collectIndexableFiles(connector.path);
+    let skipped = 0;
 
     for (const file of files) {
-      const content = fs.readFileSync(file, 'utf8');
-      const title = path.basename(file).replace(/\.md$/i, '');
+      const ext = path.extname(file).slice(1).toLowerCase();
+      let content: string;
+      try {
+        content =
+          ext === 'md'
+            ? fs.readFileSync(file, 'utf8')
+            : (await extractDocumentText(file, fs.readFileSync(file))).text;
+      } catch (error) {
+        skipped += 1;
+        console.warn(
+          `[kb] 跳过无法解析的文件 ${file}:`,
+          error instanceof Error ? error.message : error
+        );
+        continue;
+      }
+
+      const title = path.parse(file).name;
       const existing = await prisma.kbDoc.findFirst({
         where: { connectorId, path: file },
         select: { id: true, title: true, content: true }
@@ -299,9 +321,16 @@ export async function reindexConnector(connectorId: string) {
       }
     }
 
+    indexed = files.length - skipped;
+    const skippedNote = skipped ? `，跳过 ${skipped} 个无法解析的文件` : '';
     await prisma.kbConnector.update({
       where: { id: connectorId },
-      data: { status: 'on', indexedCount: indexed, lastIndexedAt: new Date() }
+      data: {
+        status: 'on',
+        indexedCount: indexed,
+        lastIndexedAt: new Date(),
+        meta: `已索引 ${indexed} 个文件（Markdown/PDF/Word）${skippedNote}`
+      }
     });
   } else {
     // 路径不可访问时明确报错，避免显示“已连接”却索引不到任何内容

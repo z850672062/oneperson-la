@@ -710,7 +710,7 @@ paths:
       tags: [KnowledgeBase]
       summary: 重建索引
       description: |
-        obsidian：path 存在时递归读取 `.md` 文件并入库；path 不存在时返回模拟计数。
+        obsidian：path 存在时递归读取 `.md`、`.pdf`、`.docx` 文件并提取文本入库（单个文件最多 20 万字符，无法解析的扫描件/加密文件会跳过）；path 不存在时报错。
         ima：重新校验凭据并刷新可访问知识库列表（实时检索，不落地文档），indexed 为知识库数量。
       responses:
         '200':

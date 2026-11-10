@@ -206,7 +206,9 @@ export default function ConnectorModal({
                 setError('')
               }}
             />
-            <div className="field-hint">只读接入不修改原库；索引保存在本地数据库。</div>
+            <div className="field-hint">
+              支持 Markdown、PDF、Word（.docx）；只读接入不修改原库，索引保存在本地数据库。
+            </div>
           </div>
         )}
 
@@ -215,7 +217,7 @@ export default function ConnectorModal({
         <p className="card-note">
           {type === 'ima'
             ? '腾讯 IMA 通过开放接口只读检索知识库，对话与检索结果会标注「IMA」来源。'
-            : '本地知识库只读接入，支持 Markdown 增量索引。'}
+            : '本地知识库只读接入，支持 Markdown、PDF、Word（.docx）增量索引。'}
         </p>
       </div>
     </Modal>
