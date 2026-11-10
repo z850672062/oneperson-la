@@ -113,7 +113,8 @@ export function serializeConnector(connector: KbConnector) {
     path: connector.path,
     meta: connector.meta,
     indexedCount: connector.indexedCount,
-    lastIndexedAt: connector.lastIndexedAt ? connector.lastIndexedAt.toISOString() : null
+    lastIndexedAt: connector.lastIndexedAt ? connector.lastIndexedAt.toISOString() : null,
+    hasCredential: Boolean(connector.credentialEnc)
   };
 }
 

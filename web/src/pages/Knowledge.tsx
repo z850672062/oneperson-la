@@ -254,12 +254,20 @@ export default function Knowledge() {
             {connectors.map((connector) => {
               const connected = isConnected(connector)
               const meta: string[] = []
-              if (connector.path) meta.push(String(connector.path))
-              if (typeof connector.docCount === 'number') meta.push(`${connector.docCount} 个文档`)
-              else if (typeof connector.indexed === 'number') meta.push(`${connector.indexed} 个文档`)
-              if (connector.lastIndexedAt) meta.push(`上次索引 ${formatDateTime(String(connector.lastIndexedAt))}`)
-              if (!meta.length && connector.meta) meta.push(String(connector.meta))
-              if (!meta.length) meta.push('尚未配置路径')
+              if (connector.type === 'ima') {
+                if (connector.meta) meta.push(String(connector.meta))
+                if (connector.lastIndexedAt)
+                  meta.push(`上次验证 ${formatDateTime(String(connector.lastIndexedAt))}`)
+                if (!meta.length) meta.push('尚未配置 IMA 凭据')
+              } else {
+                if (connector.path) meta.push(String(connector.path))
+                if (typeof connector.docCount === 'number') meta.push(`${connector.docCount} 个文档`)
+                else if (typeof connector.indexed === 'number') meta.push(`${connector.indexed} 个文档`)
+                if (connector.lastIndexedAt)
+                  meta.push(`上次索引 ${formatDateTime(String(connector.lastIndexedAt))}`)
+                if (!meta.length && connector.meta) meta.push(String(connector.meta))
+                if (!meta.length) meta.push('尚未配置路径')
+              }
 
               return (
                 <article className="conn-card" key={connector.id}>

@@ -626,11 +626,13 @@ paths:
           application/json:
             schema:
               type: object
-              required: [name, type, path]
+              required: [name, type]
               properties:
                 name: { type: string, minLength: 1 }
                 type: { type: string, enum: [obsidian, ima] }
-                path: { type: string }
+                path: { type: string, description: 'obsidian 必填；ima 可留空' }
+                clientId: { type: string, description: 'IMA Client ID（type=ima 时必填）' }
+                apiKey: { type: string, description: 'IMA API Key（type=ima 时必填，加密存储）' }
       responses:
         '201':
           description: 已创建
@@ -662,6 +664,8 @@ paths:
                 path: { type: string }
                 status: { type: string, enum: [on, off] }
                 meta: { type: string }
+                clientId: { type: string, description: 'IMA Client ID，与 apiKey 同时提交才会更新凭据' }
+                apiKey: { type: string, description: 'IMA API Key，加密存储，响应不返回明文' }
       responses:
         '200':
           description: OK
@@ -681,7 +685,11 @@ paths:
       - $ref: '#/components/parameters/PathId'
     post:
       tags: [KnowledgeBase]
-      summary: 启用连接器
+      summary: 启用连接器 / 验证凭据
+      description: |
+        obsidian：直接置为启用。
+        ima：调用 IMA 开放接口校验 Client ID 与 API Key，成功后自动同步可访问知识库列表；
+        校验失败会返回 422 并将连接器置为 error。
       responses:
         '200':
           description: OK
@@ -702,8 +710,8 @@ paths:
       tags: [KnowledgeBase]
       summary: 重建索引
       description: |
-        path 存在：递归读取目录下 `.md` 文件并入库（按 connectorId + path 去重更新）。
-        path 不存在：基于已有种子条目返回模拟计数（不新增文档）。
+        obsidian：path 存在时递归读取 `.md` 文件并入库；path 不存在时返回模拟计数。
+        ima：重新校验凭据并刷新可访问知识库列表（实时检索，不落地文档），indexed 为知识库数量。
       responses:
         '200':
           description: 索引结果
@@ -1408,6 +1416,7 @@ components:
         meta: { type: string }
         indexedCount: { type: integer }
         lastIndexedAt: { type: string, format: date-time, nullable: true }
+        hasCredential: { type: boolean, description: '是否已保存加密凭据（IMA）' }
 
     KbSearchItem:
       type: object

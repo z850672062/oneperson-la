@@ -124,6 +124,7 @@ export interface Connector {
   docCount?: number
   lastIndexedAt?: string | null
   meta?: string
+  hasCredential?: boolean
   config?: Record<string, unknown>
   [key: string]: unknown
 }

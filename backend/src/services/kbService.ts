@@ -2,6 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { prisma } from '../prisma';
 import { validationError } from '../utils/errors';
+import {
+  listImaKnowledgeBases,
+  parseImaConfig,
+  readImaCredentials,
+  rememberImaItem,
+  searchImaKnowledge
+} from './imaService';
 
 export interface KbSearchResult {
   id: string;
@@ -89,6 +96,46 @@ function buildExcerpt(content: string, lowerContent: string, needle: string, lim
   return `${start > 0 ? '…' : ''}${content.slice(start, end)}${end < content.length ? '…' : ''}`;
 }
 
+async function searchImaConnectors(query: string): Promise<KbSearchResult[]> {
+  const connectors = await prisma.kbConnector.findMany({
+    where: { type: 'ima', status: 'on' },
+    select: { id: true, name: true, credentialEnc: true, configJson: true }
+  });
+
+  const items: KbSearchResult[] = [];
+  for (const connector of connectors) {
+    const credentials = readImaCredentials(connector.credentialEnc);
+    if (!credentials) continue;
+    const config = parseImaConfig(connector.configJson);
+    for (const [kbIndex, kbId] of config.knowledgeBaseIds.slice(0, 5).entries()) {
+      try {
+        const found = await searchImaKnowledge(credentials, kbId, query);
+        const kbName = config.knowledgeBaseNames[kbId] || connector.name;
+        found.slice(0, 5).forEach((item, index) => {
+          const id = `ima:${kbId}:${item.mediaId}`;
+          const snippet = item.snippet.replace(/<[^>]+>/g, '').trim() || item.title;
+          const pathLabel = `IMA · ${kbName}`;
+          rememberImaItem(id, { title: item.title, path: pathLabel, snippet });
+          items.push({
+            id,
+            title: `[IMA] ${item.title}`,
+            path: pathLabel,
+            snippet: snippet.length > 160 ? `${snippet.slice(0, 160)}…` : snippet,
+            excerpt: snippet.slice(0, 1500),
+            score: Math.max(0.5, 0.92 - kbIndex * 0.02 - index * 0.04)
+          });
+        });
+      } catch (error) {
+        console.warn(
+          `[kb] IMA 检索失败 connector=${connector.id} kb=${kbId}:`,
+          error instanceof Error ? error.message : error
+        );
+      }
+    }
+  }
+  return items;
+}
+
 export async function searchKb(rawQuery: string): Promise<{ items: KbSearchResult[]; took: number }> {
   const startedAt = Date.now();
   const query = rawQuery.trim();
@@ -99,11 +146,14 @@ export async function searchKb(rawQuery: string): Promise<{ items: KbSearchResul
   const terms = extractTerms(query);
   const cleanedQuery = query.toLowerCase().replace(STOP_PATTERN, '').trim();
   const phrase = cleanedQuery;
-  const docs = await prisma.kbDoc.findMany({
-    select: { id: true, title: true, path: true, content: true }
-  });
+  const [docs, imaItems] = await Promise.all([
+    prisma.kbDoc.findMany({
+      select: { id: true, title: true, path: true, content: true }
+    }),
+    searchImaConnectors(query)
+  ]);
 
-  const items: KbSearchResult[] = [];
+  const items: KbSearchResult[] = [...imaItems];
   for (const doc of docs) {
     const lowerTitle = doc.title.toLowerCase();
     const lowerContent = doc.content.toLowerCase();
@@ -177,9 +227,48 @@ function collectMarkdownFiles(target: string): string[] {
   return files;
 }
 
+async function reindexImaConnector(connector: { id: string; credentialEnc: string | null }) {
+  const credentials = readImaCredentials(connector.credentialEnc);
+  if (!credentials) {
+    throw validationError('请先在「配置」中填写 IMA 的 Client ID 与 API Key');
+  }
+
+  const startedAt = Date.now();
+  const knowledgeBases = await listImaKnowledgeBases(credentials);
+  if (!knowledgeBases.length) {
+    throw validationError('IMA 未返回可访问的知识库，请确认该账号已加入知识库');
+  }
+
+  const config = {
+    knowledgeBaseIds: knowledgeBases.map((kb) => kb.id),
+    knowledgeBaseNames: Object.fromEntries(knowledgeBases.map((kb) => [kb.id, kb.name]))
+  };
+
+  await prisma.kbConnector.update({
+    where: { id: connector.id },
+    data: {
+      status: 'on',
+      indexedCount: 0,
+      lastIndexedAt: new Date(),
+      meta: `已连接 IMA · ${knowledgeBases.length} 个知识库可用`,
+      configJson: JSON.stringify(config)
+    }
+  });
+
+  return {
+    indexed: knowledgeBases.length,
+    updated: 0,
+    durationMs: Math.max(1, Date.now() - startedAt)
+  };
+}
+
 export async function reindexConnector(connectorId: string) {
   const connector = await prisma.kbConnector.findUnique({ where: { id: connectorId } });
   if (!connector) return null;
+
+  if (connector.type === 'ima') {
+    return reindexImaConnector(connector);
+  }
 
   const startedAt = Date.now();
   let indexed = 0;

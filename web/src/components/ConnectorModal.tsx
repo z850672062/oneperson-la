@@ -15,7 +15,7 @@ interface ConnectorModalProps {
 const TYPE_OPTIONS = [
   { value: 'obsidian', label: 'Obsidian 本地库' },
   { value: 'folder', label: '本地文件夹（Markdown）' },
-  { value: 'ima', label: '腾讯 IMA（P1）' },
+  { value: 'ima', label: '腾讯 IMA 知识库' },
 ]
 
 export default function ConnectorModal({
@@ -28,6 +28,8 @@ export default function ConnectorModal({
   const [type, setType] = useState('obsidian')
   const [name, setName] = useState('')
   const [path, setPath] = useState('')
+  const [clientId, setClientId] = useState('')
+  const [apiKey, setApiKey] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -36,6 +38,8 @@ export default function ConnectorModal({
     setType(connector?.type ?? 'obsidian')
     setName(connector?.name ?? '')
     setPath(connector?.path ?? '')
+    setClientId('')
+    setApiKey('')
     setError('')
   }, [open, connector])
 
@@ -48,14 +52,50 @@ export default function ConnectorModal({
       setError('请填写知识库路径')
       return
     }
+    const hasStoredCredential = Boolean(connector?.hasCredential)
+    if (type === 'ima') {
+      if (!editing && (!clientId.trim() || !apiKey.trim())) {
+        setError('请填写 IMA 的 Client ID 与 API Key')
+        return
+      }
+      if (editing && !hasStoredCredential && (!clientId.trim() || !apiKey.trim())) {
+        setError('请填写 IMA 的 Client ID 与 API Key')
+        return
+      }
+      if ((clientId.trim() && !apiKey.trim()) || (!clientId.trim() && apiKey.trim())) {
+        setError('Client ID 与 API Key 需要同时填写')
+        return
+      }
+    }
     setSaving(true)
     try {
       if (editing && connector) {
-        await updateConnector(connector.id, { name: name.trim(), path: path.trim() })
-        toastSuccess('连接器配置已保存')
+        await updateConnector(connector.id, {
+          name: name.trim(),
+          ...(type !== 'ima' ? { path: path.trim() } : {}),
+          ...(clientId.trim() && apiKey.trim()
+            ? { clientId: clientId.trim(), apiKey: apiKey.trim() }
+            : {}),
+        })
+        toastSuccess(
+          clientId.trim() && apiKey.trim()
+            ? '凭据已保存，请点击「尝试连接」验证'
+            : '连接器配置已保存',
+        )
       } else {
-        await createConnector({ type, name: name.trim(), path: path.trim() })
-        toastSuccess('连接器已添加，请完成连接与索引')
+        await createConnector({
+          type,
+          name: name.trim(),
+          path: type === 'ima' ? '' : path.trim(),
+          ...(type === 'ima'
+            ? { clientId: clientId.trim(), apiKey: apiKey.trim() }
+            : {}),
+        })
+        toastSuccess(
+          type === 'ima'
+            ? 'IMA 连接器已添加，请点击「尝试连接」验证'
+            : '连接器已添加，请完成连接与索引',
+        )
       }
       onSaved()
       onClose()
@@ -112,26 +152,70 @@ export default function ConnectorModal({
           />
         </div>
 
-        <div className="record-field">
-          <label htmlFor="conn-path">
-            <b>路径 / 接口地址</b>
-          </label>
-          <Input
-            id="conn-path"
-            value={path}
-            placeholder="D:\Notes\Legal"
-            onChange={(event) => {
-              setPath(event.target.value)
-              setError('')
-            }}
-          />
-          <div className="field-hint">只读接入不修改原库；索引保存在本地数据库。</div>
-        </div>
+        {type === 'ima' ? (
+          <>
+            <div className="record-field">
+              <label htmlFor="conn-client-id">
+                <b>Client ID</b>
+              </label>
+              <Input
+                id="conn-client-id"
+                value={clientId}
+                autoComplete="off"
+                placeholder={
+                  editing && connector?.hasCredential ? '已保存，留空则保持不变' : 'IMA 开放接口 Client ID'
+                }
+                onChange={(event) => {
+                  setClientId(event.target.value)
+                  setError('')
+                }}
+              />
+            </div>
+            <div className="record-field">
+              <label htmlFor="conn-api-key">
+                <b>API Key</b>
+              </label>
+              <Input.Password
+                id="conn-api-key"
+                value={apiKey}
+                autoComplete="new-password"
+                placeholder={
+                  editing && connector?.hasCredential ? '已保存，留空则保持不变' : 'IMA 开放接口 API Key'
+                }
+                onChange={(event) => {
+                  setApiKey(event.target.value)
+                  setError('')
+                }}
+              />
+              <div className="field-hint">
+                凭据加密存储；保存后点击「尝试连接」自动获取可访问的知识库。
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="record-field">
+            <label htmlFor="conn-path">
+              <b>路径 / 接口地址</b>
+            </label>
+            <Input
+              id="conn-path"
+              value={path}
+              placeholder="D:\Notes\Legal"
+              onChange={(event) => {
+                setPath(event.target.value)
+                setError('')
+              }}
+            />
+            <div className="field-hint">只读接入不修改原库；索引保存在本地数据库。</div>
+          </div>
+        )}
 
         {error ? <div className="field-error">{error}</div> : null}
 
         <p className="card-note">
-          腾讯 IMA 依赖其开放接口，P1 阶段提供导出导入降级方案。
+          {type === 'ima'
+            ? '腾讯 IMA 通过开放接口只读检索知识库，对话与检索结果会标注「IMA」来源。'
+            : '本地知识库只读接入，支持 Markdown 增量索引。'}
         </p>
       </div>
     </Modal>
