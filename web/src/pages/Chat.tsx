@@ -55,6 +55,36 @@ const ALLOWED_EXTENSIONS = new Set(['docx', 'xlsx', 'xls', 'pdf', 'md', 'txt', '
 const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024
 const MAX_ATTACHMENTS = 5
 
+/** 本地存储键名（作用域限定在 chat 页面的按钮开关） */
+const LS_KEYS = {
+  kb: 'chat:toggle:kb',
+  mem: 'chat:toggle:mem',
+  web: 'chat:toggle:web',
+  agent: 'chat:toggle:agent',
+} as const
+
+/** 从 localStorage 读取布尔值，缺失或非法时返回 fallback */
+function readBool(key: string, fallback: boolean): boolean {
+  try {
+    const raw = localStorage.getItem(key)
+    if (raw === null) return fallback
+    if (raw === 'true') return true
+    if (raw === 'false') return false
+    return fallback
+  } catch {
+    return fallback
+  }
+}
+
+/** 写入布尔值到 localStorage（仅在浏览器环境） */
+function writeBool(key: string, value: boolean): void {
+  try {
+    localStorage.setItem(key, value ? 'true' : 'false')
+  } catch {
+    /* 隐私模式/配额满等场景下静默失败 */
+  }
+}
+
 export default function Chat() {
   const navigate = useNavigate()
   const { modal } = App.useApp()
@@ -71,10 +101,16 @@ export default function Chat() {
   const [streamCitations, setStreamCitations] = useState<Citation[]>([])
   const [models, setModels] = useState<LlmModel[]>([])
   const [modelId, setModelId] = useState<string | null>(null)
-  const [kbOn, setKbOn] = useState(true)
-  const [memOn, setMemOn] = useState(true)
-  const [webOn, setWebOn] = useState(true)
-  const [agentOn, setAgentOn] = useState(false)
+  const [kbOn, setKbOn] = useState(() => readBool(LS_KEYS.kb, true))
+  const [memOn, setMemOn] = useState(() => readBool(LS_KEYS.mem, true))
+  const [webOn, setWebOn] = useState(() => readBool(LS_KEYS.web, true))
+  const [agentOn, setAgentOn] = useState(() => readBool(LS_KEYS.agent, false))
+
+  /** 任意开关变动时实时写回 localStorage */
+  useEffect(() => { writeBool(LS_KEYS.kb, kbOn) }, [kbOn])
+  useEffect(() => { writeBool(LS_KEYS.mem, memOn) }, [memOn])
+  useEffect(() => { writeBool(LS_KEYS.web, webOn) }, [webOn])
+  useEffect(() => { writeBool(LS_KEYS.agent, agentOn) }, [agentOn])
   const [memory, setMemory] = useState<MemoryItem[]>([])
   const [memoryOpen, setMemoryOpen] = useState(false)
   const [memoryLoading, setMemoryLoading] = useState(false)
