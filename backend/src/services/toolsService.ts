@@ -112,6 +112,81 @@ export const TOOLS_SCHEMA: unknown[] = [
         additionalProperties: false
       }
     }
+  },
+  // ---------- 写操作工具 ----------
+  {
+    type: 'function',
+    function: {
+      name: 'create_record',
+      description: '新建一条工作记录并写入数据库。用户说"帮我加一条"、"记一下这个合同"、"创建一个待办"时调用。成功后返回新记录的 ID。',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: '事项标题（必填）' },
+          category: { type: 'string', description: '分类名称，如"合同审查"、"劳动人事"、"争议解决"等；若不存在会提示可选分类' },
+          sub: { type: 'string', description: '可选：事项副标题/简述' },
+          subType: { type: 'string', description: '可选：子类型标签，如"劳动合同"、"买卖合同"' },
+          risk: { type: 'string', enum: ['高', '中', '低'], description: '风险等级，默认"中"' },
+          status: { type: 'string', enum: ['doing', 'done', 'pending', 'blocked'], description: '状态：doing=进行中 done=已完成 pending=待开始 blocked=阻塞；默认 doing' },
+          dueDate: { type: 'string', description: '可选：截止日期 YYYY-MM-DD' },
+          hours: { type: 'number', description: '可选：预估工时（小时）' }
+        },
+        required: ['name'],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_record',
+      description: '更新某条工作记录的字段（状态/风险/截止日/标题等）。用户说"把那条标记完成"、"这个截止日改到下月"、"把风险调低"时调用。必须提供 recordId（可先 search_records 查到 ID）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          recordId: { type: 'string', description: '记录 ID（必填，可从 search_records/list_upcoming 结果里拿到）' },
+          name: { type: 'string', description: '新标题' },
+          sub: { type: 'string', description: '新副标题/简述' },
+          status: { type: 'string', enum: ['doing', 'done', 'pending', 'blocked'], description: '新状态' },
+          risk: { type: 'string', enum: ['高', '中', '低'], description: '新风险等级' },
+          dueDate: { type: 'string', description: '新截止日期 YYYY-MM-DD；传空字符串表示清除截止日' },
+          hours: { type: 'number', description: '新工时（小时）' }
+        },
+        required: ['recordId'],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_record',
+      description: '删除一条工作记录（不可恢复！）。用户说"删掉这条"、"移除那个事项"时调用。删除前建议先用 get_record 确认内容。',
+      parameters: {
+        type: 'object',
+        properties: {
+          recordId: { type: 'string', description: '要删除的记录 ID（必填）' },
+          confirm: { type: 'boolean', description: '必须显式传 true 才执行删除，防止误操作' }
+        },
+        required: ['recordId', 'confirm'],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_record',
+      description: '按 ID 精确查询一条工作记录的完整字段详情。用户要查看/编辑某条具体记录前可先确认内容。',
+      parameters: {
+        type: 'object',
+        properties: {
+          recordId: { type: 'string', description: '记录 ID（必填）' }
+        },
+        required: ['recordId'],
+        additionalProperties: false
+      }
+    }
   }
 ];
 
@@ -155,7 +230,7 @@ async function executeSearchRecords(args: Record<string, unknown>): Promise<Tool
   const lines = items.map((r) => {
     const dl = r.dueDate ? new Date(r.dueDate).toISOString().slice(0, 10) : '';
     const extra = parseValuesExcerpt(r.valuesJson);
-    return `- [${r.category?.name ?? '未分类'}][风险:${r.risk ?? '-'}] ${r.name}${extra}${dl ? `（截止 ${dl}）` : ''}`;
+    return `- [${r.id}][${r.category?.name ?? '未分类'}][风险:${r.risk ?? '-'}] ${r.name}${extra}${dl ? `（截止 ${dl}）` : ''}`;
   });
   return { ok: true, content: `共 ${items.length} 条：\n${lines.join('\n')}` };
 }
@@ -193,7 +268,7 @@ async function executeListUpcoming(args: Record<string, unknown>): Promise<ToolC
   if (!items.length) return { ok: true, content: `未来 ${days} 天内没有到期事项。` };
   const lines = items.map((r) => {
     const dl = r.dueDate ? new Date(r.dueDate).toISOString().slice(0, 10) : '';
-    return `- [${dl}] ${r.name}（${r.category?.name ?? '未分类'}，风险 ${r.risk ?? '-'}）`;
+    return `- [${r.id}][${dl}] ${r.name}（${r.category?.name ?? '未分类'}，风险 ${r.risk ?? '-'}）`;
   });
   return { ok: true, content: `未来 ${days} 天共 ${items.length} 条到期：\n${lines.join('\n')}` };
 }
@@ -285,18 +360,210 @@ async function executeListRecentRecords(args: Record<string, unknown>): Promise<
   });
   const lines = items.map((r) => {
     const updated = new Date(r.updatedAt).toISOString().slice(0, 10);
-    return `- [${updated}][${r.category?.name ?? '未分类'}] ${r.name}`;
+    return `- [${r.id}][${updated}][${r.category?.name ?? '未分类'}] ${r.name}`;
   });
   return { ok: true, content: lines.join('\n') || '暂无工作记录。' };
 }
 
+// ---------- 写操作执行器 ----------
+
+async function executeGetRecord(args: Record<string, unknown>): Promise<ToolCallResult> {
+  const recordId = typeof args.recordId === 'string' ? args.recordId.trim() : '';
+  if (!recordId) return { ok: false, content: '', error: 'recordId 必填' };
+  const r = await prisma.record.findUnique({ where: { id: recordId }, include: { category: true } });
+  if (!r) return { ok: true, content: `未找到 ID 为 ${recordId} 的记录。` };
+  const dl = r.dueDate ? new Date(r.dueDate).toISOString().slice(0, 10) : '无';
+  let values = '';
+  try {
+    const v = JSON.parse(r.valuesJson);
+    values = Object.keys(v).length ? `\n  动态字段：${JSON.stringify(v)}` : '';
+  } catch { /* ignore */ }
+  return {
+    ok: true,
+    content: [
+      `ID: ${r.id}`,
+      `标题: ${r.name}`,
+      `副标题: ${r.sub || '(空)'}`,
+      `子类型: ${r.subType || '(空)'}`,
+      `分类: ${r.category?.name ?? '未分类'}`,
+      `状态: ${r.status}`,
+      `风险: ${r.risk ?? '-'}`,
+      `截止日: ${dl}`,
+      `工时: ${r.hours}h`,
+      `创建: ${new Date(r.createdAt).toISOString().slice(0, 16).replace('T', ' ')}`,
+      `更新: ${new Date(r.updatedAt).toISOString().slice(0, 16).replace('T', ' ')}`,
+      values
+    ].join('\n')
+  };
+}
+
+async function executeCreateRecord(args: Record<string, unknown>): Promise<ToolCallResult> {
+  const name = typeof args.name === 'string' ? args.name.trim() : '';
+  if (!name) return { ok: false, content: '', error: 'name 必填' };
+
+  // 解析分类：给定名字 → 查 ID；不存在则提示可选列表
+  let categoryId = '';
+  if (typeof args.category === 'string' && args.category.trim()) {
+    const catName = args.category.trim();
+    const cat = await prisma.category.findFirst({ where: { name: catName } });
+    if (!cat) {
+      const all = await prisma.category.findMany({ select: { name: true } });
+      const list = all.map((c) => c.name).join('、') || '(暂无分类，请先在系统里创建分类)';
+      return {
+        ok: false,
+        content: '',
+        error: `分类「${catName}」不存在。可选分类：${list}`
+      };
+    }
+    categoryId = cat.id;
+  } else {
+    // 没给分类就用第一个存在的分类，或创建一个默认的
+    const first = await prisma.category.findFirst({ orderBy: { sort: 'asc' } });
+    if (first) {
+      categoryId = first.id;
+    } else {
+      const created = await prisma.category.create({ data: { name: '未分类' } });
+      categoryId = created.id;
+    }
+  }
+
+  const risk = ['高', '中', '低'].includes(String(args.risk ?? '')) ? String(args.risk) : '中';
+  const validStatus = ['doing', 'done', 'pending', 'blocked'];
+  const status = validStatus.includes(String(args.status ?? '')) ? String(args.status) : 'doing';
+
+  const dueDate = typeof args.dueDate === 'string' && args.dueDate.trim()
+    ? new Date(args.dueDate + 'T00:00:00.000')
+    : null;
+  if (dueDate && isNaN(dueDate.getTime())) {
+    return { ok: false, content: '', error: `dueDate 格式无效，请用 YYYY-MM-DD，收到：${args.dueDate}` };
+  }
+
+  const record = await prisma.record.create({
+    data: {
+      categoryId,
+      name,
+      sub: typeof args.sub === 'string' ? args.sub.trim() : '',
+      subType: typeof args.subType === 'string' ? args.subType.trim() : '',
+      status,
+      risk,
+      dueDate,
+      hours: typeof args.hours === 'number' ? args.hours : 0,
+      valuesJson: '{}'
+    },
+    include: { category: true }
+  });
+
+  const dl = record.dueDate ? new Date(record.dueDate).toISOString().slice(0, 10) : '无';
+  return {
+    ok: true,
+    content: [
+      `✅ 已创建工作记录：`,
+      `ID: ${record.id}`,
+      `标题: ${record.name}`,
+      `分类: ${record.category?.name ?? '未分类'}`,
+      `状态: ${record.status} | 风险: ${record.risk} | 截止: ${dl}`
+    ].join('\n')
+  };
+}
+
+async function executeUpdateRecord(args: Record<string, unknown>): Promise<ToolCallResult> {
+  const recordId = typeof args.recordId === 'string' ? args.recordId.trim() : '';
+  if (!recordId) return { ok: false, content: '', error: 'recordId 必填' };
+
+  const existing = await prisma.record.findUnique({ where: { id: recordId }, include: { category: true } });
+  if (!existing) return { ok: false, content: '', error: `未找到 ID 为 ${recordId} 的记录` };
+
+  const data: Record<string, unknown> = {};
+  if (typeof args.name === 'string') data.name = args.name.trim();
+  if (typeof args.sub === 'string') data.sub = args.sub.trim();
+
+  if (args.status !== undefined) {
+    const valid = ['doing', 'done', 'pending', 'blocked'];
+    if (!valid.includes(String(args.status))) {
+      return { ok: false, content: '', error: `status 必须是 ${valid.join('/')}，收到：${args.status}` };
+    }
+    data.status = args.status;
+  }
+
+  if (args.risk !== undefined) {
+    const valid = ['高', '中', '低'];
+    if (!valid.includes(String(args.risk))) {
+      return { ok: false, content: '', error: `risk 必须是 高/中/低，收到：${args.risk}` };
+    }
+    data.risk = args.risk;
+  }
+
+  if ('dueDate' in args) {
+    const raw = args.dueDate;
+    if (typeof raw === 'string') {
+      if (raw.trim() === '') {
+        data.dueDate = null; // 空字符串 → 清除
+      } else {
+        const parsed = new Date(raw + 'T00:00:00.000');
+        if (isNaN(parsed.getTime())) {
+          return { ok: false, content: '', error: `dueDate 格式无效，收到：${raw}` };
+        }
+        data.dueDate = parsed;
+      }
+    }
+  }
+
+  if (typeof args.hours === 'number') data.hours = args.hours;
+
+  if (!Object.keys(data).length) {
+    return { ok: true, content: '未提供任何可更新的字段，记录未变动。' };
+  }
+
+  const updated = await prisma.record.update({
+    where: { id: recordId },
+    data,
+    include: { category: true }
+  });
+
+  const changed = Object.keys(data).join(', ');
+  return {
+    ok: true,
+    content: [
+      `✅ 已更新记录 ${recordId}`,
+      `变更字段: ${changed}`,
+      `当前状态: ${updated.status} | 风险: ${updated.risk} | 标题: ${updated.name}`
+    ].join('\n')
+  };
+}
+
+async function executeDeleteRecord(args: Record<string, unknown>): Promise<ToolCallResult> {
+  const recordId = typeof args.recordId === 'string' ? args.recordId.trim() : '';
+  const confirm = Boolean(args.confirm);
+  if (!recordId) return { ok: false, content: '', error: 'recordId 必填' };
+  if (!confirm) {
+    return {
+      ok: false,
+      content: '',
+      error: '删除是不可逆操作，必须显式传 confirm: true 才执行。请在确认用户确实要删除后再调用。'
+    };
+  }
+
+  const existing = await prisma.record.findUnique({ where: { id: recordId }, include: { category: true } });
+  if (!existing) return { ok: true, content: `记录 ${recordId} 不存在（可能已被删除）。` };
+
+  const label = `${existing.name}（${existing.category?.name ?? '未分类'}）`;
+  await prisma.record.delete({ where: { id: recordId } });
+  return { ok: true, content: `🗑️ 已删除记录：${label}（${recordId}）` };
+}
+
 const REGISTRY: Record<string, (args: Record<string, unknown>) => Promise<ToolCallResult>> = {
+  // 只读工具
   search_records: executeSearchRecords,
   list_upcoming: executeListUpcoming,
   kb_search: executeKbSearch,
   generate_summary: executeGenerateSummary,
   list_categories: executeListCategories,
-  list_recent_records: executeListRecentRecords
+  list_recent_records: executeListRecentRecords,
+  get_record: executeGetRecord,
+  // 写操作工具
+  create_record: executeCreateRecord,
+  update_record: executeUpdateRecord,
+  delete_record: executeDeleteRecord
 };
 
 export async function executeToolCall(call: ToolCallInput): Promise<ToolCallResult> {
