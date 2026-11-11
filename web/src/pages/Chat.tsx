@@ -74,6 +74,7 @@ export default function Chat() {
   const [kbOn, setKbOn] = useState(true)
   const [memOn, setMemOn] = useState(true)
   const [webOn, setWebOn] = useState(true)
+  const [agentOn, setAgentOn] = useState(false)
   const [memory, setMemory] = useState<MemoryItem[]>([])
   const [memoryOpen, setMemoryOpen] = useState(false)
   const [memoryLoading, setMemoryLoading] = useState(false)
@@ -263,6 +264,7 @@ export default function Chat() {
           useKb: kbOn,
           useMemory: memOn,
           useWeb: webOn,
+          useTools: agentOn,
           attachments: outgoing.map(({ name, text: attachmentText }) => ({
             name,
             text: attachmentText,
@@ -487,6 +489,15 @@ export default function Chat() {
                 onClick={() => setWebOn((value) => !value)}
               >
                 联网
+              </button>
+              <button
+                type="button"
+                className={`tchip${agentOn ? ' on' : ''}`}
+                aria-pressed={agentOn}
+                title="Agent 模式：允许 AI 自主调用工具查询记录、统计汇总、检索知识库。开启后每次对话多消耗约 1200 tokens（工具 schema），可能触发多轮对话。"
+                onClick={() => setAgentOn((value) => !value)}
+              >
+                Agent
               </button>
               <span className="card-note chat-count">
                 {loading ? '连接中…' : `${messages.length} 条消息`}

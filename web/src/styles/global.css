@@ -713,6 +713,32 @@ a {
   font-weight: 500;
 }
 
+.link-name {
+  font-weight: 500;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  font-size: inherit;
+  line-height: inherit;
+  font-family: inherit;
+  border-radius: 3px;
+  transition: color 0.15s, background 0.15s, text-decoration 0.15s;
+}
+
+.link-name:hover {
+  color: var(--accent-dark, #1f6feb);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link-name:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .cell-sub {
   margin-top: 1px;
   font-size: 12px;

@@ -202,7 +202,9 @@ export default function Records() {
         key: 'name',
         render: (_, record) => (
           <div>
-            <div className="cell-main">{record.name}</div>
+            <button className="link-name" type="button" onClick={() => openEdit(record)}>
+              {record.name}
+            </button>
             {record.sub ? <div className="cell-sub">{record.sub}</div> : null}
           </div>
         ),

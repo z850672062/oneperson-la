@@ -91,6 +91,7 @@ export interface ChatSendPayload {
   useKb: boolean
   useMemory: boolean
   useWeb?: boolean
+  useTools?: boolean
   attachments?: Array<{ name: string; text: string }>
   images?: Array<{ name: string; dataUrl: string }>
 }

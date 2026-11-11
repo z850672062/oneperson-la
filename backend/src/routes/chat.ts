@@ -60,6 +60,7 @@ const messageSchema = z.object({
   useKb: z.boolean().optional().default(false),
   useMemory: z.boolean().optional().default(false),
   useWeb: z.boolean().optional().default(false),
+  useTools: z.boolean().optional().default(false),
   attachments: z
     .array(attachmentSchema)
     .max(MAX_ATTACHMENT_COUNT, `单条消息最多携带 ${MAX_ATTACHMENT_COUNT} 个附件`)
@@ -249,59 +250,70 @@ chatRouter.post(
         try {
           const systemPrompt = buildSystemPrompt(context, resolved, webSources);
 
-          // 工具调用多轮循环：最多 5 轮防止死循环
-          const MAX_TOOL_ROUNDS = 5;
-          let round = 0;
-          while (round < MAX_TOOL_ROUNDS) {
-            round += 1;
+          if (body.useTools) {
+            // Agent 模式：工具调用多轮循环，最多 5 轮防止死循环
+            const MAX_TOOL_ROUNDS = 5;
+            let round = 0;
+            while (round < MAX_TOOL_ROUNDS) {
+              round += 1;
+              const upstream = await streamChatCompletion(
+                resolved,
+                systemPrompt,
+                messages,
+                res,
+                TOOLS_SCHEMA
+              );
+
+              answerText += upstream.text;
+
+              if (!upstream.finalToolCalls.length) {
+                // 模型返回纯文本，工具调用结束
+                break;
+              }
+
+              // 把本轮 assistant message（带 tool_calls）追加进 messages，供后续轮次使用
+              messages.push({
+                role: 'assistant',
+                content: upstream.text || '',
+                tool_calls: upstream.finalToolCalls.map((tc) => ({
+                  id: tc.id,
+                  type: 'function',
+                  function: { name: tc.name, arguments: tc.arguments }
+                }))
+              });
+
+              // 执行每个 tool_call
+              for (const call of upstream.finalToolCalls) {
+                sseWrite(res, 'tool_call', { id: call.id, name: call.name, arguments: call.arguments });
+                const result = await executeToolCall(call);
+                if (result.ok) {
+                  sseWrite(res, 'tool_result', { id: call.id, name: call.name, content: result.content });
+                } else {
+                  sseWrite(res, 'tool_error', { id: call.id, name: call.name, error: result.error ?? '未知错误' });
+                }
+                // tool_result 加入 messages
+                messages.push({
+                  role: 'tool',
+                  tool_call_id: call.id,
+                  content: result.ok ? result.content : `工具执行失败：${result.error ?? '未知错误'}`
+                });
+              }
+
+              // 给模型发一条说明：刚刚执行了哪些工具
+              sseWrite(res, 'delta', {
+                text: `\n\n> （已调用 ${upstream.finalToolCalls.map((c) => c.name).join(', ')}，正在整合结果…）\n\n`
+              });
+              answerText += `\n\n> （已调用 ${upstream.finalToolCalls.map((c) => c.name).join(', ')}，正在整合结果…）\n\n`;
+            }
+          } else {
+            // 普通模式：单次对话，不传 tools schema，省 ~1200 tokens
             const upstream = await streamChatCompletion(
               resolved,
               systemPrompt,
               messages,
-              res,
-              TOOLS_SCHEMA
+              res
             );
-
             answerText += upstream.text;
-
-            if (!upstream.finalToolCalls.length) {
-              // 模型返回纯文本，工具调用结束
-              break;
-            }
-
-            // 把本轮 assistant message（带 tool_calls）追加进 messages，供后续轮次使用
-            messages.push({
-              role: 'assistant',
-              content: upstream.text || '',
-              tool_calls: upstream.finalToolCalls.map((tc) => ({
-                id: tc.id,
-                type: 'function',
-                function: { name: tc.name, arguments: tc.arguments }
-              }))
-            });
-
-            // 执行每个 tool_call
-            for (const call of upstream.finalToolCalls) {
-              sseWrite(res, 'tool_call', { id: call.id, name: call.name, arguments: call.arguments });
-              const result = await executeToolCall(call);
-              if (result.ok) {
-                sseWrite(res, 'tool_result', { id: call.id, name: call.name, content: result.content });
-              } else {
-                sseWrite(res, 'tool_error', { id: call.id, name: call.name, error: result.error ?? '未知错误' });
-              }
-              // tool_result 加入 messages
-              messages.push({
-                role: 'tool',
-                tool_call_id: call.id,
-                content: result.ok ? result.content : `工具执行失败：${result.error ?? '未知错误'}`
-              });
-            }
-
-            // 给模型发一条说明：刚刚执行了哪些工具
-            sseWrite(res, 'delta', {
-              text: `\n\n> （已调用 ${upstream.finalToolCalls.map((c) => c.name).join(', ')}，正在整合结果…）\n\n`
-            });
-            answerText += `\n\n> （已调用 ${upstream.finalToolCalls.map((c) => c.name).join(', ')}，正在整合结果…）\n\n`;
           }
 
           if (!answerText.trim()) {
