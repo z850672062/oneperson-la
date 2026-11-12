@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { login as loginApi, logout as logoutApi, me, updateProfile as updateProfileApi } from '../api/auth'
-import { refreshAccessToken, setAccessToken, setSessionExpiredHandler } from '../api/client'
+import { getAccessToken, refreshAccessToken, setAccessToken, setSessionExpiredHandler, syncTokenFromStorage } from '../api/client'
 import type { User } from '../types'
 
 export type AuthStatus = 'idle' | 'checking' | 'authed' | 'guest'
@@ -23,7 +23,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   async bootstrap() {
     if (get().status === 'authed' || get().status === 'checking') return
     set({ status: 'checking' })
-    // 刷新页面后优先使用 HttpOnly refresh cookie 恢复会话
+    // 1）先用本地保存的 accessToken 校验：多窗口/刷新页面时可直接恢复，避免依赖 refresh cookie
+    if (getAccessToken()) {
+      try {
+        const user = await me()
+        set({ user, status: 'authed' })
+        return
+      } catch {
+        /* token 已失效，继续走 refresh */
+      }
+    }
+    // 2）刷新页面后优先使用 HttpOnly refresh cookie 恢复会话
     const token = await refreshAccessToken()
     if (!token) {
       set({ user: null, status: 'guest' })
@@ -40,6 +50,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   async refreshQuiet() {
     if (get().status === 'authed') return
+    // 主窗口登录后会写入 localStorage，这里每轮重新读取
+    if (syncTokenFromStorage()) {
+      try {
+        const user = await me()
+        set({ user, status: 'authed' })
+        return
+      } catch {
+        /* 令牌无效则继续尝试 refresh cookie */
+      }
+    }
     const token = await refreshAccessToken()
     if (!token) return
     try {

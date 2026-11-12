@@ -27,7 +27,7 @@ export default function StickyWindow() {
 
   if (status === 'idle' || status === 'checking') {
     return (
-      <div className="sticky-window-state" data-tauri-drag-region>
+      <div className="sticky-window-state" data-tauri-drag-region="deep">
         <Spin size="small" />
       </div>
     )
@@ -35,8 +35,8 @@ export default function StickyWindow() {
 
   if (status !== 'authed') {
     return (
-      <div className="sticky-window-state" data-tauri-drag-region>
-        <p data-tauri-drag-region>请先在主窗口登录</p>
+      <div className="sticky-window-state" data-tauri-drag-region="deep">
+        <p>请先在主窗口登录</p>
         <button
           type="button"
           className="sticky-link"

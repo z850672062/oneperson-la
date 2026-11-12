@@ -24,6 +24,17 @@ export function getAccessToken(): string | null {
   return accessToken
 }
 
+/** 重新从 localStorage 同步令牌（多窗口场景下其它窗口可能刚写入） */
+export function syncTokenFromStorage(): string | null {
+  try {
+    const stored = localStorage.getItem(TOKEN_KEY)
+    if (stored) accessToken = stored
+    return stored
+  } catch {
+    return null
+  }
+}
+
 export function setAccessToken(token: string | null): void {
   accessToken = token
   try {

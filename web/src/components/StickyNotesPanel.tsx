@@ -24,6 +24,15 @@ import { tauriInvoke } from '../utils/tauri'
 import type { StickyNoteItem, StickySuggestion } from '../types'
 
 const OPEN_KEY = 'sticky:open'
+const PIN_KEY = 'sticky:pinned'
+
+function readPinned(): boolean {
+  try {
+    return localStorage.getItem(PIN_KEY) !== 'false'
+  } catch {
+    return true
+  }
+}
 
 function readOpen(): boolean {
   try {
@@ -71,7 +80,7 @@ export default function StickyNotesPanel({ variant = 'panel' }: StickyNotesPanel
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null)
   const [form, setForm] = useState<ConfirmForm>({ title: '', dueDate: null, risk: '中' })
   const [converting, setConverting] = useState(false)
-  const [pinned, setPinned] = useState(true)
+  const [pinned, setPinned] = useState(readPinned)
   const [collapsed, setCollapsed] = useState(false)
 
   const categories = useCategoriesStore((state) => state.items)
@@ -111,6 +120,11 @@ export default function StickyNotesPanel({ variant = 'panel' }: StickyNotesPanel
   async function togglePinned() {
     const next = !pinned
     setPinned(next)
+    try {
+      localStorage.setItem(PIN_KEY, next ? 'true' : 'false')
+    } catch {
+      /* 隐私模式下忽略 */
+    }
     await tauriInvoke('set_sticky_pinned', { pinned: next })
   }
 
@@ -250,8 +264,8 @@ export default function StickyNotesPanel({ variant = 'panel' }: StickyNotesPanel
         aria-label="便签"
       >
         {isWindow ? (
-          <header className="sticky-head sticky-head--window" data-tauri-drag-region>
-            <span className="sticky-title" data-tauri-drag-region>
+          <header className="sticky-head sticky-head--window" data-tauri-drag-region="deep">
+            <span className="sticky-title">
               <PushpinOutlined /> 便签
             </span>
             <div className="sticky-win-actions">
