@@ -13,6 +13,7 @@ import Fields from './pages/Fields'
 import Knowledge from './pages/Knowledge'
 import Chat from './pages/Chat'
 import Settings from './pages/Settings'
+import StickyWindow from './pages/StickyWindow'
 
 function MessageBridge() {
   const { message } = AntdApp.useApp()
@@ -62,6 +63,7 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/sticky" element={<StickyWindow />} />
             <Route element={<RequireAuth />}>
               <Route element={<AppLayout />}>
                 <Route index element={<Navigate to="/dashboard" replace />} />

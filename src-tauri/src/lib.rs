@@ -1,17 +1,35 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use tauri::{Manager, WebviewUrl};
-use tauri::menu::{Menu, MenuItem, Submenu};
-use tauri::Url;
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_autostart::ManagerExt;
+
+const MAIN_LABEL: &str = "main";
+const STICKY_LABEL: &str = "sticky";
+const STICKY_W: f64 = 360.0;
+const STICKY_H: f64 = 520.0;
+const STICKY_COLLAPSED_H: f64 = 38.0;
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+struct StickyCfg {
+    x: Option<i32>,
+    y: Option<i32>,
+    w: Option<f64>,
+    h: Option<f64>,
+    pinned: Option<bool>,
+}
 
 #[derive(Serialize, Deserialize, Default)]
 struct AppConfig {
     server_url: Option<String>,
+    #[serde(default)]
+    sticky: StickyCfg,
 }
 
 /// 配置文件路径：app_data_dir/config.json
-fn config_path(app: &tauri::AppHandle) -> PathBuf {
+fn config_path(app: &AppHandle) -> PathBuf {
     let mut p = app
         .path()
         .app_data_dir()
@@ -20,7 +38,7 @@ fn config_path(app: &tauri::AppHandle) -> PathBuf {
     p
 }
 
-fn load_config(app: &tauri::AppHandle) -> AppConfig {
+fn load_config(app: &AppHandle) -> AppConfig {
     let p = config_path(app);
     if p.exists() {
         if let Ok(s) = fs::read_to_string(&p) {
@@ -29,10 +47,10 @@ fn load_config(app: &tauri::AppHandle) -> AppConfig {
             }
         }
     }
-    AppConfig { server_url: None }
+    AppConfig::default()
 }
 
-fn save_config(app: &tauri::AppHandle, cfg: &AppConfig) -> Result<(), String> {
+fn save_config(app: &AppHandle, cfg: &AppConfig) -> Result<(), String> {
     let p = config_path(app);
     if let Some(parent) = p.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -53,44 +71,201 @@ fn setup_page_url() -> Url {
     }
 }
 
+fn server_page_url(server: &str, path: &str) -> Option<Url> {
+    let base = server.trim_end_matches('/');
+    Url::parse(&format!("{base}{path}")).ok()
+}
+
 /// 读取已保存的服务器地址（用于设置页回填）
 #[tauri::command]
-fn get_server_url(app: tauri::AppHandle) -> Option<String> {
+fn get_server_url(app: AppHandle) -> Option<String> {
     load_config(&app).server_url
 }
 
 /// 保存服务器地址并跳转到该地址
 #[tauri::command]
-fn save_server_url(app: tauri::AppHandle, url: String) -> Result<String, String> {
+fn save_server_url(app: AppHandle, url: String) -> Result<String, String> {
     let mut url = url.trim().to_string();
     if url.is_empty() {
         return Err("地址不能为空".into());
     }
-    // 去除末尾斜杠
     while url.ends_with('/') {
         url.pop();
     }
-    let parsed = Url::parse(&url).map_err(|_| "地址格式不正确，请以 http:// 或 https:// 开头".to_string())?;
+    let parsed =
+        Url::parse(&url).map_err(|_| "地址格式不正确，请以 http:// 或 https:// 开头".to_string())?;
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
         return Err("仅支持 http 或 https 协议".into());
     }
 
-    let cfg = AppConfig {
-        server_url: Some(url.clone()),
-    };
+    let mut cfg = load_config(&app);
+    cfg.server_url = Some(url.clone());
     save_config(&app, &cfg)?;
 
-    if let Some(win) = app.get_webview_window("main") {
+    if let Some(win) = app.get_webview_window(MAIN_LABEL) {
         let _ = win.navigate(parsed);
+    }
+    if let Some(sticky_url) = server_page_url(&url, "/sticky") {
+        match app.get_webview_window(STICKY_LABEL) {
+            Some(win) => {
+                let _ = win.navigate(sticky_url);
+                let _ = win.show();
+            }
+            None => {
+                let _ = create_sticky_window(&app, &sticky_url);
+            }
+        }
     }
     Ok(url)
 }
 
 /// 打开设置页（修改服务器地址）
-fn open_setup_page(app: &tauri::AppHandle) {
-    if let Some(win) = app.get_webview_window("main") {
+fn open_setup_page(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window(MAIN_LABEL) {
+        let _ = win.show();
         let _ = win.navigate(setup_page_url());
     }
+}
+
+fn toggle_pin(app: &AppHandle) {
+    let cfg = load_config(app);
+    let next = !cfg.sticky.pinned.unwrap_or(true);
+    if let Some(win) = app.get_webview_window(STICKY_LABEL) {
+        let _ = win.set_always_on_top(next);
+    }
+    let mut cfg2 = cfg;
+    cfg2.sticky.pinned = Some(next);
+    let _ = save_config(app, &cfg2);
+}
+
+/// 设置便签窗置顶
+#[tauri::command]
+fn set_sticky_pinned(app: AppHandle, pinned: bool) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window(STICKY_LABEL) {
+        win.set_always_on_top(pinned).map_err(|e| e.to_string())?;
+    }
+    let mut cfg = load_config(&app);
+    cfg.sticky.pinned = Some(pinned);
+    let _ = save_config(&app, &cfg);
+    Ok(())
+}
+
+/// 收起 / 展开便签窗（只改变窗口高度，不改记忆中的高度）
+#[tauri::command]
+fn set_sticky_collapsed(app: AppHandle, collapsed: bool) -> Result<(), String> {
+    let win = app
+        .get_webview_window(STICKY_LABEL)
+        .ok_or_else(|| "便签窗口不存在".to_string())?;
+    let cfg = load_config(&app);
+    let w = cfg.sticky.w.unwrap_or(STICKY_W);
+    let h = if collapsed {
+        STICKY_COLLAPSED_H
+    } else {
+        cfg.sticky.h.unwrap_or(STICKY_H)
+    };
+    win.set_size(tauri::LogicalSize::new(w, h))
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 隐藏便签窗（不退出程序）
+#[tauri::command]
+fn hide_sticky_window(app: AppHandle) {
+    if let Some(win) = app.get_webview_window(STICKY_LABEL) {
+        let _ = win.hide();
+    }
+}
+
+/// 显示并聚焦主窗口
+#[tauri::command]
+fn open_main_window(app: AppHandle) {
+    if let Some(win) = app.get_webview_window(MAIN_LABEL) {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
+}
+
+fn show_sticky(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window(STICKY_LABEL) {
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+}
+
+fn toggle_sticky(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window(STICKY_LABEL) {
+        match win.is_visible() {
+            Ok(true) => {
+                let _ = win.hide();
+            }
+            _ => show_sticky(app),
+        }
+    }
+}
+
+/// 保存便签窗位置与尺寸
+fn save_sticky_geometry(app: &AppHandle) {
+    let Some(win) = app.get_webview_window(STICKY_LABEL) else {
+        return;
+    };
+    let scale = win.scale_factor().unwrap_or(1.0);
+    let mut cfg = load_config(app);
+    if let Ok(p) = win.outer_position() {
+        let lp = p.to_logical::<f64>(scale);
+        cfg.sticky.x = Some(lp.x.round() as i32);
+        cfg.sticky.y = Some(lp.y.round() as i32);
+    }
+    if let Ok(size) = win.inner_size() {
+        let ls = size.to_logical::<f64>(scale);
+        cfg.sticky.w = Some(ls.width);
+        // 收起态高度不覆盖记忆值
+        if ls.height > 100.0 {
+            cfg.sticky.h = Some(ls.height);
+        }
+    }
+    let _ = save_config(app, &cfg);
+}
+
+/// 事件回调里做轻量防抖，避免拖动时高频写文件
+fn schedule_save_geometry(app: &AppHandle) {
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(350));
+        save_sticky_geometry(&handle);
+    });
+}
+
+/// 创建独立桌面便签窗口
+fn create_sticky_window(app: &AppHandle, url: &Url) -> tauri::Result<()> {
+    if app.get_webview_window(STICKY_LABEL).is_some() {
+        show_sticky(app);
+        return Ok(());
+    }
+
+    let cfg = load_config(app);
+    let s = cfg.sticky;
+    let w = s.w.unwrap_or(STICKY_W);
+    let h = s.h.unwrap_or(STICKY_H);
+    let pinned = s.pinned.unwrap_or(true);
+
+    let mut builder = WebviewWindowBuilder::new(app, STICKY_LABEL, WebviewUrl::External(url.clone()))
+        .title("便签")
+        .inner_size(w, h)
+        .min_inner_size(280.0, STICKY_COLLAPSED_H)
+        .decorations(false)
+        .resizable(true)
+        .always_on_top(pinned)
+        .skip_taskbar(true)
+        .visible(false);
+
+    if let (Some(x), Some(y)) = (s.x, s.y) {
+        builder = builder.position(x as f64, y as f64);
+    }
+
+    let win = builder.build()?;
+    win.show()?;
+    Ok(())
 }
 
 /// 首次启动配置页 HTML（内嵌在 exe 中，不依赖网络）
@@ -148,7 +323,6 @@ const SETUP_HTML: &str = r#"<!DOCTYPE html>
   var err = document.getElementById('err');
   var btn = document.getElementById('save');
 
-  // 已保存过地址时回填，方便修改
   if (invoke) {
     invoke('get_server_url').then(function (u) {
       if (u) input.value = u;
@@ -181,15 +355,93 @@ const SETUP_HTML: &str = r#"<!DOCTYPE html>
 </html>
 "#;
 
+/// 托盘：显示/隐藏便签、打开主窗口、退出
+fn build_tray(app: &AppHandle) -> tauri::Result<()> {
+    let show_item = MenuItem::with_id(app, "show_sticky", "显示便签", true, None::<&str>)?;
+    let hide_item = MenuItem::with_id(app, "hide_sticky", "隐藏便签", true, None::<&str>)?;
+    let pin_item = MenuItem::with_id(app, "toggle_pin", "切换置顶", true, None::<&str>)?;
+    let main_item = MenuItem::with_id(app, "open_main", "打开主窗口", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &show_item,
+            &hide_item,
+            &pin_item,
+            &main_item,
+            &PredefinedMenuItem::separator(app)?,
+            &quit_item,
+        ],
+    )?;
+
+    let mut builder = TrayIconBuilder::with_id("main-tray")
+        .tooltip("一人法务")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show_sticky" => show_sticky(app),
+            "hide_sticky" => {
+                if let Some(win) = app.get_webview_window(STICKY_LABEL) {
+                    let _ = win.hide();
+                }
+            }
+            "toggle_pin" => toggle_pin(app),
+            "open_main" => {
+                if let Some(win) = app.get_webview_window(MAIN_LABEL) {
+                    let _ = win.show();
+                    let _ = win.unminimize();
+                    let _ = win.set_focus();
+                }
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                toggle_sticky(tray.app_handle());
+            }
+        });
+
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone());
+    }
+    builder.build(app)?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--sticky-only"]),
+        ))
         .register_uri_scheme_protocol("setup", |_app, _request| {
             tauri::http::Response::builder()
                 .status(200)
                 .header("Content-Type", "text/html; charset=utf-8")
                 .body(SETUP_HTML.as_bytes().to_vec())
                 .unwrap()
+        })
+        .on_window_event(|window, event| {
+            if window.label() != STICKY_LABEL {
+                return;
+            }
+            match event {
+                tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
+                    schedule_save_geometry(window.app_handle());
+                }
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                _ => {}
+            }
         })
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -199,6 +451,11 @@ pub fn run() {
                         .build(),
                 )?;
             }
+
+            // 开机自启（幂等）
+            let _ = app.autolaunch().enable();
+
+            let cfg = load_config(app.handle());
 
             // 菜单：设置 → 修改服务器地址
             let settings_item =
@@ -214,22 +471,41 @@ pub fn run() {
                 }
             });
 
-            // 读取已保存的服务器地址，决定首屏加载内容
-            let cfg = load_config(app.handle());
-            let initial_url = match cfg.server_url {
-                Some(u) => WebviewUrl::External(Url::parse(&u).unwrap()),
-                None => WebviewUrl::CustomProtocol(Url::parse("setup://localhost/").unwrap()),
-            };
+            build_tray(app.handle())?;
 
-            tauri::WebviewWindowBuilder::new(app, "main", initial_url)
-                .title("一人法务")
-                .inner_size(1440.0, 900.0)
-                .resizable(true)
-                .build()?;
+            // 开机自启时只显示便签窗，不弹出主窗口
+            let sticky_only = std::env::args().any(|arg| arg == "--sticky-only");
+
+            if !sticky_only {
+                let initial_url = match &cfg.server_url {
+                    Some(u) => WebviewUrl::External(Url::parse(u).unwrap()),
+                    None => WebviewUrl::CustomProtocol(Url::parse("setup://localhost/").unwrap()),
+                };
+
+                WebviewWindowBuilder::new(app, MAIN_LABEL, initial_url)
+                    .title("一人法务")
+                    .inner_size(1440.0, 900.0)
+                    .resizable(true)
+                    .build()?;
+            }
+
+            // 已配置服务器时同时打开便签窗
+            if let Some(server) = cfg.server_url.as_deref() {
+                if let Some(sticky_url) = server_page_url(server, "/sticky") {
+                    let _ = create_sticky_window(app.handle(), &sticky_url);
+                }
+            }
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![save_server_url, get_server_url])
+        .invoke_handler(tauri::generate_handler![
+            save_server_url,
+            get_server_url,
+            set_sticky_pinned,
+            set_sticky_collapsed,
+            hide_sticky_window,
+            open_main_window
+        ])
         .run(tauri::generate_context!())
         .expect("error while building tauri application");
 }

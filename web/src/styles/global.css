@@ -2078,6 +2078,60 @@ mark.search-hit {
   color: var(--muted);
 }
 
+/* ---------- 便签内容容器（面板与独立窗口共用） ---------- */
+.sticky-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ---------- 独立桌面便签窗口 ---------- */
+html.sticky-window-html,
+html.sticky-window-html body.sticky-window-body {
+  overflow: hidden;
+  background: #fff;
+}
+
+.sticky-panel--window {
+  position: static;
+  width: 100vw;
+  height: 100vh;
+  border-left: none;
+  box-shadow: none;
+}
+
+.sticky-panel--window.sticky-panel--collapsed .sticky-body {
+  display: none;
+}
+
+.sticky-head--window {
+  padding: 8px 8px 8px 14px;
+  user-select: none;
+}
+
+.sticky-win-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.sticky-win-actions .sticky-icon-btn.is-on {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.sticky-window-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 100vh;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 @media (max-width: 768px) {
   .sticky-panel {
     width: min(320px, 88vw);

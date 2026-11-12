@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Button, Checkbox, DatePicker, Empty, Input, Modal, Popconfirm, Select, Spin } from 'antd'
-import { CloseOutlined, DeleteOutlined, PlusOutlined, PushpinOutlined } from '@ant-design/icons'
+import {
+  CloseOutlined,
+  DeleteOutlined,
+  MinusOutlined,
+  PlusOutlined,
+  PushpinFilled,
+  PushpinOutlined,
+} from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { toastError, toastSuccess } from '../api/notify'
 import { apiErrorMessage } from '../api/client'
@@ -13,6 +20,7 @@ import {
   suggestStickyNote,
 } from '../api/stickyNotes'
 import { useCategoriesStore } from '../store/categories'
+import { tauriInvoke } from '../utils/tauri'
 import type { StickyNoteItem, StickySuggestion } from '../types'
 
 const OPEN_KEY = 'sticky:open'
@@ -46,8 +54,14 @@ interface ConfirmState {
   suggestion: StickySuggestion | null
 }
 
-export default function StickyNotesPanel() {
-  const [open, setOpen] = useState(readOpen)
+interface StickyNotesPanelProps {
+  /** panel：主应用内右侧滑出面板；window：独立桌面便签窗口 */
+  variant?: 'panel' | 'window'
+}
+
+export default function StickyNotesPanel({ variant = 'panel' }: StickyNotesPanelProps) {
+  const isWindow = variant === 'window'
+  const [open, setOpen] = useState(() => (isWindow ? true : readOpen()))
   const [items, setItems] = useState<StickyNoteItem[]>([])
   const [archived, setArchived] = useState<StickyNoteItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -57,6 +71,8 @@ export default function StickyNotesPanel() {
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null)
   const [form, setForm] = useState<ConfirmForm>({ title: '', dueDate: null, risk: '中' })
   const [converting, setConverting] = useState(false)
+  const [pinned, setPinned] = useState(true)
+  const [collapsed, setCollapsed] = useState(false)
 
   const categories = useCategoriesStore((state) => state.items)
   const loadCategories = useCategoriesStore((state) => state.load)
@@ -75,22 +91,38 @@ export default function StickyNotesPanel() {
   }, [])
 
   useEffect(() => {
-    persistOpen(open)
+    if (!isWindow) persistOpen(open)
     if (open) void reload()
-  }, [open, reload])
+  }, [open, reload, isWindow])
 
   useEffect(() => {
     if (open) void loadCategories()
   }, [open, loadCategories])
 
   useEffect(() => {
-    if (!open) return
+    if (!open || isWindow) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !confirmState) setOpen(false)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [open, confirmState])
+  }, [open, confirmState, isWindow])
+
+  async function togglePinned() {
+    const next = !pinned
+    setPinned(next)
+    await tauriInvoke('set_sticky_pinned', { pinned: next })
+  }
+
+  async function toggleCollapsed() {
+    const next = !collapsed
+    setCollapsed(next)
+    await tauriInvoke('set_sticky_collapsed', { collapsed: next })
+  }
+
+  function hideWindow() {
+    void tauriInvoke('hide_sticky_window')
+  }
 
   async function handleAdd() {
     const content = draft.trim()
@@ -191,7 +223,7 @@ export default function StickyNotesPanel() {
     }
   }
 
-  if (!open) {
+  if (!open && !isWindow) {
     return (
       <button
         type="button"
@@ -207,22 +239,69 @@ export default function StickyNotesPanel() {
 
   return (
     <>
-      <aside className="sticky-panel" aria-label="便签">
-        <header className="sticky-head">
-          <span className="sticky-title">
-            <PushpinOutlined /> 便签
-          </span>
-          <button
-            type="button"
-            className="sticky-icon-btn"
-            aria-label="收起便签"
-            onClick={() => setOpen(false)}
-          >
-            <CloseOutlined />
-          </button>
-        </header>
+      <aside
+        className={[
+          'sticky-panel',
+          isWindow ? 'sticky-panel--window' : '',
+          collapsed ? 'sticky-panel--collapsed' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+        aria-label="便签"
+      >
+        {isWindow ? (
+          <header className="sticky-head sticky-head--window" data-tauri-drag-region>
+            <span className="sticky-title" data-tauri-drag-region>
+              <PushpinOutlined /> 便签
+            </span>
+            <div className="sticky-win-actions">
+              <button
+                type="button"
+                className={`sticky-icon-btn${pinned ? ' is-on' : ''}`}
+                aria-label={pinned ? '取消置顶' : '置顶'}
+                title={pinned ? '取消置顶' : '置顶'}
+                onClick={() => void togglePinned()}
+              >
+                {pinned ? <PushpinFilled /> : <PushpinOutlined />}
+              </button>
+              <button
+                type="button"
+                className="sticky-icon-btn"
+                aria-label={collapsed ? '展开便签' : '收起便签'}
+                title={collapsed ? '展开' : '收起'}
+                onClick={() => void toggleCollapsed()}
+              >
+                <MinusOutlined />
+              </button>
+              <button
+                type="button"
+                className="sticky-icon-btn"
+                aria-label="隐藏便签"
+                title="隐藏到托盘"
+                onClick={hideWindow}
+              >
+                <CloseOutlined />
+              </button>
+            </div>
+          </header>
+        ) : (
+          <header className="sticky-head">
+            <span className="sticky-title">
+              <PushpinOutlined /> 便签
+            </span>
+            <button
+              type="button"
+              className="sticky-icon-btn"
+              aria-label="收起便签"
+              onClick={() => setOpen(false)}
+            >
+              <CloseOutlined />
+            </button>
+          </header>
+        )}
 
-        <div className="sticky-input">
+        <div className="sticky-body">
+          <div className="sticky-input">
           <Input
             size="small"
             placeholder="记一条，回车保存"
@@ -312,11 +391,13 @@ export default function StickyNotesPanel() {
             </div>
           ) : null}
         </footer>
+        </div>
       </aside>
 
       <Modal
         open={Boolean(confirmState)}
         title="记入工作记录"
+        width={isWindow ? 320 : 520}
         okText="确认"
         cancelText="取消"
         confirmLoading={converting}
