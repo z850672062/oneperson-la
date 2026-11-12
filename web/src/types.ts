@@ -74,6 +74,26 @@ export interface RecordPayload {
   kbDocIds: string[]
 }
 
+export interface StickyNoteItem {
+  id: string
+  content: string
+  done: boolean
+  categoryId: string | null
+  recordId: string | null
+  doneAt: string | null
+  createdAt: string
+}
+
+export interface StickySuggestion {
+  categoryId: string | null
+  categoryName: string | null
+  title: string
+  dueDate: string | null
+  risk: string
+  degraded: boolean
+  reason: string
+}
+
 export interface PageResult<T> {
   items: T[]
   total: number

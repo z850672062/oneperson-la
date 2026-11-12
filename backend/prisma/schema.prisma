@@ -90,6 +90,20 @@ model Record {
   @@index([createdAt])
 }
 
+// 便签：一行一条；勾选后由 AI 建议归类并转为工作记录
+model StickyNote {
+  id         String    @id @default(cuid())
+  content    String    @db.VarChar(500)
+  done       Boolean   @default(false)
+  categoryId String?
+  recordId   String?   @unique
+  doneAt     DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([done, createdAt])
+}
+
 // 记录与知识库文档多对多
 model RecordKb {
   id       String @id @default(cuid())

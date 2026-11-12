@@ -18,6 +18,7 @@ import { chatRouter } from './routes/chat';
 import { profileRouter } from './routes/profile';
 import { llmRouter, settingsRouter } from './routes/settings';
 import { userRouter } from './routes/user';
+import { stickyNotesRouter } from './routes/stickyNotes';
 
 const VERSION = '0.1.0';
 
@@ -71,6 +72,7 @@ app.use('/api/profile', authMiddleware, profileRouter);
 app.use('/api/settings', authMiddleware, settingsRouter);
 app.use('/api/llm/models', authMiddleware, llmRouter);
 app.use('/api/user', authMiddleware, userRouter);
+app.use('/api/sticky-notes', authMiddleware, stickyNotesRouter);
 
 app.use('/api', notFoundHandler);
 

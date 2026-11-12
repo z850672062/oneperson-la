@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { MenuOutlined } from '@ant-design/icons'
 import Sidebar from './Sidebar'
+import StickyNotesPanel from './StickyNotesPanel'
 import { useCategoriesStore } from '../store/categories'
 
 export default function AppLayout() {
@@ -47,6 +48,7 @@ export default function AppLayout() {
         </div>
         <Outlet />
       </div>
+      <StickyNotesPanel />
     </div>
   )
 }
