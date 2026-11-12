@@ -668,6 +668,18 @@ export default function Settings() {
 
               <div className="set-row">
                 <div className="set-label">
+                  <b>便签 AI 归类</b>
+                  <span>便签勾选完成时由 AI 建议分类/日期；关闭则完全人工填写</span>
+                </div>
+                <Switch
+                  aria-label="便签 AI 归类"
+                  checked={settings.stickyAiSuggest}
+                  onChange={(checked) => void patchSettings({ stickyAiSuggest: checked })}
+                />
+              </div>
+
+              <div className="set-row">
+                <div className="set-label">
                   <b>默认模型</b>
                   <span>{settings.defaultModel || '未配置，请在模型配置中添加'}</span>
                 </div>

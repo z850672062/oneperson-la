@@ -173,7 +173,8 @@ export function serializeSettings(setting: Setting) {
   return {
     maskSensitive: setting.maskSensitive,
     maskLlm: setting.maskLlm,
-    defaultModel: setting.defaultModel
+    defaultModel: setting.defaultModel,
+    stickyAiSuggest: setting.stickyAiSuggest
   };
 }
 

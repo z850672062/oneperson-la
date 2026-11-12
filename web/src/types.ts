@@ -205,6 +205,8 @@ export interface Settings {
   maskSensitive: boolean
   maskLlm: boolean
   defaultModel: string | null
+  /** 便签勾选完成时是否调用 AI 归类；关闭则人工填写 */
+  stickyAiSuggest: boolean
 }
 
 export interface LlmModel {

@@ -20,7 +20,8 @@ async function getSettings(): Promise<Setting> {
 const patchSettingsSchema = z.object({
   maskSensitive: z.boolean().optional(),
   maskLlm: z.boolean().optional(),
-  defaultModel: z.string().trim().min(1).optional()
+  defaultModel: z.string().trim().min(1).optional(),
+  stickyAiSuggest: z.boolean().optional()
 });
 
 settingsRouter.get(
@@ -41,7 +42,8 @@ settingsRouter.patch(
       data: {
         ...(body.maskSensitive !== undefined ? { maskSensitive: body.maskSensitive } : {}),
         ...(body.maskLlm !== undefined ? { maskLlm: body.maskLlm } : {}),
-        ...(body.defaultModel !== undefined ? { defaultModel: body.defaultModel } : {})
+        ...(body.defaultModel !== undefined ? { defaultModel: body.defaultModel } : {}),
+        ...(body.stickyAiSuggest !== undefined ? { stickyAiSuggest: body.stickyAiSuggest } : {})
       }
     });
     res.status(200).json({ settings: serializeSettings(setting) });

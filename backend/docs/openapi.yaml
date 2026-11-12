@@ -1003,6 +1003,7 @@ paths:
                 maskSensitive: { type: boolean }
                 maskLlm: { type: boolean }
                 defaultModel: { type: string }
+                stickyAiSuggest: { type: boolean }
       responses:
         '200':
           description: OK
@@ -1480,11 +1481,14 @@ components:
 
     Settings:
       type: object
-      required: [maskSensitive, maskLlm, defaultModel]
+      required: [maskSensitive, maskLlm, defaultModel, stickyAiSuggest]
       properties:
         maskSensitive: { type: boolean }
         maskLlm: { type: boolean }
         defaultModel: { type: string }
+        stickyAiSuggest:
+          type: boolean
+          description: 便签勾选完成时是否调用 AI 归类；关闭则由用户手工填写
 
     LlmModel:
       type: object

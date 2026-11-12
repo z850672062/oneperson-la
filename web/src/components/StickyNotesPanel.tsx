@@ -20,6 +20,7 @@ import {
   suggestStickyNote,
 } from '../api/stickyNotes'
 import { useCategoriesStore } from '../store/categories'
+import { getSettings } from '../api/settings'
 import { tauriInvoke } from '../utils/tauri'
 import type { StickyNoteItem, StickySuggestion } from '../types'
 
@@ -82,6 +83,7 @@ export default function StickyNotesPanel({ variant = 'panel' }: StickyNotesPanel
   const [converting, setConverting] = useState(false)
   const [pinned, setPinned] = useState(readPinned)
   const [collapsed, setCollapsed] = useState(false)
+  const [aiSuggest, setAiSuggest] = useState(true)
 
   const categories = useCategoriesStore((state) => state.items)
   const loadCategories = useCategoriesStore((state) => state.load)
@@ -105,7 +107,13 @@ export default function StickyNotesPanel({ variant = 'panel' }: StickyNotesPanel
   }, [open, reload, isWindow])
 
   useEffect(() => {
-    if (open) void loadCategories()
+    if (!open) return
+    void loadCategories()
+    void getSettings()
+      .then((value) => setAiSuggest(value.stickyAiSuggest !== false))
+      .catch(() => {
+        /* 读取失败时按默认开启处理 */
+      })
   }, [open, loadCategories])
 
   useEffect(() => {
@@ -171,13 +179,20 @@ export default function StickyNotesPanel({ variant = 'panel' }: StickyNotesPanel
   }
 
   async function handleCheck(note: StickyNoteItem) {
-    setConfirmState({ note, loading: true, suggestion: null })
-    setForm({
+    const baseForm = {
       title: note.content,
       categoryId: categories[0]?.id,
       dueDate: null,
       risk: '中',
-    })
+    }
+    // 设置中心关闭「便签 AI 归类」时，直接进入人工填写，不调用模型
+    if (!aiSuggest) {
+      setForm(baseForm)
+      setConfirmState({ note, loading: false, suggestion: null })
+      return
+    }
+    setConfirmState({ note, loading: true, suggestion: null })
+    setForm(baseForm)
     try {
       const suggestion = await suggestStickyNote(note.id)
       setForm({
@@ -433,6 +448,9 @@ export default function StickyNotesPanel({ variant = 'panel' }: StickyNotesPanel
           </div>
         ) : (
           <div className="sticky-form">
+            {!aiSuggest && !confirmState?.loading ? (
+              <p className="sticky-hint">已关闭便签 AI 归类，请手动选择分类后保存</p>
+            ) : null}
             {confirmState?.suggestion?.reason ? (
               <p className="sticky-hint">{confirmState.suggestion.reason}</p>
             ) : null}

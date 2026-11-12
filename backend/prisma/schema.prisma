@@ -191,12 +191,14 @@ model Report {
 
 // 单例设置（id 固定为 default）
 model Setting {
-  id            String   @id @default("default")
-  maskSensitive Boolean  @default(true)
-  maskLlm       Boolean  @default(true)
-  defaultModel  String   @default("deepseek-chat")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id              String   @id @default("default")
+  maskSensitive   Boolean  @default(true)
+  maskLlm         Boolean  @default(true)
+  defaultModel    String   @default("deepseek-chat")
+  // 便签勾选完成时是否调用 AI 归类（关闭则人工填写）
+  stickyAiSuggest Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 
 // API Key 仅以 AES-256-GCM 密文存储
