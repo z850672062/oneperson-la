@@ -16,5 +16,6 @@ coverage/
 .vscode/
 .idea/
 .DS_Store
+downloads/
 playwright-report/
 test-results/

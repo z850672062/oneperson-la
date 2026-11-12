@@ -261,6 +261,12 @@ fn create_sticky_window(app: &AppHandle, url: &Url) -> tauri::Result<()> {
 
     if let (Some(x), Some(y)) = (s.x, s.y) {
         builder = builder.position(x as f64, y as f64);
+    } else if let Ok(Some(monitor)) = app.primary_monitor() {
+        // 首次出现默认贴右上角，与预览图一致
+        let scale = monitor.scale_factor();
+        let size = monitor.size().to_logical::<f64>(scale);
+        let x = (size.width - w - 40.0).max(0.0);
+        builder = builder.position(x, 60.0);
     }
 
     let win = builder.build()?;

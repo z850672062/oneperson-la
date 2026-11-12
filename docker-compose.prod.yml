@@ -51,6 +51,8 @@ services:
         source: ${OBSIDIAN_VAULT:-/mnt/nextcloud_data}
         target: /vault
         read_only: true
+      # 桌面端安装包下载目录，由后端静态托管到 /downloads/
+      - ./downloads:/web/dist/downloads
 
 volumes:
   mysql_data:
