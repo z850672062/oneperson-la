@@ -15,5 +15,8 @@
     "db:seed": "pnpm --dir backend db:seed",
     "test": "pnpm --dir backend test && pnpm --dir web test",
     "typecheck": "pnpm --dir backend typecheck && pnpm --dir web typecheck"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.4"
   }
 }
