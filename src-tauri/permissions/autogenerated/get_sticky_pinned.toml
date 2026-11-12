@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-sticky-pinned"
+description = "Enables the get_sticky_pinned command without any pre-configured scope."
+commands.allow = ["get_sticky_pinned"]
+
+[[permission]]
+identifier = "deny-get-sticky-pinned"
+description = "Denies the get_sticky_pinned command without any pre-configured scope."
+commands.deny = ["get_sticky_pinned"]

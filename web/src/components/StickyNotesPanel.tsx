@@ -117,6 +117,14 @@ export default function StickyNotesPanel({ variant = 'panel' }: StickyNotesPanel
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [open, confirmState, isWindow])
 
+  useEffect(() => {
+    if (!isWindow) return
+    void (async () => {
+      const actual = await tauriInvoke<boolean>('get_sticky_pinned')
+      if (typeof actual === 'boolean') setPinned(actual)
+    })()
+  }, [isWindow])
+
   async function togglePinned() {
     const next = !pinned
     setPinned(next)

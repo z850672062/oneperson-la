@@ -8,6 +8,8 @@
   ],
   "remote": {
     "urls": [
+      "http://*:*/*",
+      "https://*:*/*",
       "http://*/*",
       "https://*/*"
     ]
@@ -18,6 +20,7 @@
     "allow-save-server-url",
     "allow-get-server-url",
     "allow-set-sticky-pinned",
+    "allow-get-sticky-pinned",
     "allow-set-sticky-collapsed",
     "allow-hide-sticky-window",
     "allow-open-main-window"

@@ -8,6 +8,7 @@ fn main() {
         "save_server_url",
         "get_server_url",
         "set_sticky_pinned",
+        "get_sticky_pinned",
         "set_sticky_collapsed",
         "hide_sticky_window",
         "open_main_window",

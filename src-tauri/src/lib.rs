@@ -138,6 +138,12 @@ fn toggle_pin(app: &AppHandle) {
     let _ = save_config(app, &cfg2);
 }
 
+/// 读取便签窗当前置顶状态（供界面按钮回填）
+#[tauri::command]
+fn get_sticky_pinned(app: AppHandle) -> bool {
+    load_config(&app).sticky.pinned.unwrap_or(true)
+}
+
 /// 设置便签窗置顶
 #[tauri::command]
 fn set_sticky_pinned(app: AppHandle, pinned: bool) -> Result<(), String> {
@@ -515,6 +521,7 @@ pub fn run() {
             save_server_url,
             get_server_url,
             set_sticky_pinned,
+            get_sticky_pinned,
             set_sticky_collapsed,
             hide_sticky_window,
             open_main_window
