@@ -10,7 +10,7 @@ const MAIN_LABEL: &str = "main";
 const STICKY_LABEL: &str = "sticky";
 const STICKY_W: f64 = 360.0;
 const STICKY_H: f64 = 520.0;
-const STICKY_COLLAPSED_H: f64 = 38.0;
+const STICKY_COLLAPSED_H: f64 = 40.0;
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 struct StickyCfg {
@@ -435,16 +435,23 @@ pub fn run() {
                 .unwrap()
         })
         .on_window_event(|window, event| {
-            if window.label() != STICKY_LABEL {
-                return;
-            }
-            match event {
-                tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
-                    schedule_save_geometry(window.app_handle());
-                }
-                tauri::WindowEvent::CloseRequested { api, .. } => {
-                    api.prevent_close();
-                    let _ = window.hide();
+            match window.label() {
+                STICKY_LABEL => match event {
+                    tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
+                        schedule_save_geometry(window.app_handle());
+                    }
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                    _ => {}
+                },
+                MAIN_LABEL => {
+                    // 主窗口关闭时只隐藏，方便从托盘或便签窗重新打开
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
                 }
                 _ => {}
             }

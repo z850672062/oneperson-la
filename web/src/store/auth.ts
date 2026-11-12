@@ -9,6 +9,8 @@ interface AuthState {
   user: User | null
   status: AuthStatus
   bootstrap: () => Promise<void>
+  /** 静默尝试恢复会话（不改动 loading 状态，供便签窗轮询登录态） */
+  refreshQuiet: () => Promise<void>
   login: (username: string, password: string) => Promise<void>
   updateProfile: (name: string) => Promise<void>
   logout: () => Promise<void>
@@ -33,6 +35,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch {
       setAccessToken(null)
       set({ user: null, status: 'guest' })
+    }
+  },
+
+  async refreshQuiet() {
+    if (get().status === 'authed') return
+    const token = await refreshAccessToken()
+    if (!token) return
+    try {
+      const user = await me()
+      set({ user, status: 'authed' })
+    } catch {
+      setAccessToken(null)
     }
   },
 

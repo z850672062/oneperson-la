@@ -8,12 +8,18 @@
   ],
   "remote": {
     "urls": [
-      "http://*",
-      "https://*"
+      "http://*/*",
+      "https://*/*"
     ]
   },
   "permissions": [
     "core:default",
-    "core:window:allow-start-dragging"
+    "core:window:allow-start-dragging",
+    "allow-save-server-url",
+    "allow-get-server-url",
+    "allow-set-sticky-pinned",
+    "allow-set-sticky-collapsed",
+    "allow-hide-sticky-window",
+    "allow-open-main-window"
   ]
 }
