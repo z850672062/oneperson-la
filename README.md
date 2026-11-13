@@ -1,8 +1,11 @@
 # 一人法务工作台（OnePerson_LA）
 
-面向单人法务的结构化工作台：**工作记录 → 汇总复盘 → 报表输出 → 知识库引用 → AI 对话**，最终沉淀为「AI 版本的我」。
+面向单人法务的结构化工作台：**桌面便签随手记 → AI 归档成台账 → 汇总复盘 → 报表输出 → 知识库引用 → AI 对话**，最终沉淀为「AI 版本的我」。
 
-需求与验收标准见 [docs/PRD.md](docs/PRD.md)；视觉与交互基准见 [design/prototypes/prototype.html](design/prototypes/prototype.html)。
+- Web 端：浏览器访问的完整工作台（记录、报表、知识库、对话、设置）。
+- 桌面端（Windows）：Tauri 薄客户端，内置**独立便签窗口**（360×520、置顶、托盘、开机自启），勾选待办即由 AI 建议归类并转为工作记录。
+
+需求与验收标准见 [docs/PRD.md](docs/PRD.md)；桌面端打包见 [docs/桌面版应用打包指南.md](docs/桌面版应用打包指南.md)；视觉与交互基准见 [design/prototypes/prototype.html](design/prototypes/prototype.html)。
 
 ## 技术栈
 
@@ -10,6 +13,7 @@
 | --- | --- |
 | 前端 `web/` | Vite + React 18 + TypeScript + React Router 6 + Ant Design 5 + Zustand + axios + ECharts |
 | 后端 `backend/` | Node.js 20+ + TypeScript + Express 4 + Prisma + **MySQL 8（utf8mb4 / InnoDB）** |
+| 桌面端 `src-tauri/` | **Tauri 2（Rust）**：多窗口、托盘、开机自启、NSIS 安装包；薄客户端加载服务器页面 |
 | 鉴权 | JWT Access Token（15 分钟）+ HttpOnly Refresh Cookie（7 天，服务端哈希存储、可吊销） |
 | 检索 | MySQL 包含匹配（Obsidian 本地 Markdown 只读索引） |
 | 对话 | SSE 流式输出；未配置 Key 时使用内置离线 Mock，配置 `LLM_API_KEY` 后走 DeepSeek |
@@ -19,6 +23,7 @@
 ```
 OnePerson_LA/
 ├─ docs/PRD.md                 # 产品需求（唯一功能基准）
+├─ docs/桌面版应用打包指南.md    # Tauri 打包流程与已知坑位
 ├─ design/prototypes/          # 已确认的高保真原型（HTML/CSS/JS）
 ├─ backend/
 │  ├─ docs/openapi.yaml        # API 契约（唯一接口基准）
@@ -31,7 +36,9 @@ OnePerson_LA/
 │  ├─ src/{api,components,pages,store,utils}
 │  ├─ BUILD.md / DEPLOY.md / PACKAGE.md
 │  └─ dist/                    # 构建产物（后端同端口托管）
+├─ src-tauri/                  # Windows 桌面客户端（Tauri 2 / Rust）
 ├─ docker-compose.yml          # 本地/测试用 MySQL 8
+├─ docker-compose.prod.yml     # 生产部署（MySQL + 应用单端口）
 └─ package.json                # 根脚本（不参与依赖安装）
 ```
 
@@ -69,6 +76,30 @@ pnpm start          # http://localhost:3001
 演示账号：`大力出奇迹` / `Legal1234`
 
 > 本地无 MySQL 时，`pnpm --dir backend db:up` 会用已安装的 MySQL 8 在端口 3307 启动独立实例（不影响系统服务）；`db:down` 停止，`db:status` 查看状态。Linux 请使用 Docker 或系统 MySQL。
+
+## Windows 桌面客户端
+
+Tauri 2 薄客户端：不打包前端资源，首次启动填写服务器地址即可连接自部署后端。
+
+**功能**：
+
+- 独立便签窗口（360×520、无边框、默认置顶、可收起），随手记待办
+- 勾选待办 → AI 建议分类/截止日期/风险 → 确认后转为工作记录（设置中心可关闭 AI，改人工填写）
+- 便签支持行内编辑与长文本自动换行
+- 托盘常驻：显示/隐藏便签、切换置顶、打开主窗口、退出；开机自启（仅弹便签）
+- 主窗口/便签窗关闭均为隐藏，从托盘唤回
+
+**打包**（前置：Node.js ≥ 20、pnpm ≥ 9、Rust ≥ 1.80、WebView2）：
+
+```bash
+pnpm build                                        # 先构建前端
+npx tauri build --bundles nsis                    # 产出 NSIS 安装包
+# 产物：src-tauri/target/release/bundle/nsis/一人法务_0.1.0_x64-setup.exe
+```
+
+完整流程与已知坑位（WiX 挂起、远程页面 ACL、URL 端口通配等 8 个坑）见 [docs/桌面版应用打包指南.md](docs/桌面版应用打包指南.md)。
+
+**分发**：安装包可放入服务器 `downloads/` 目录，由后端托管到 `/downloads/` 供他人下载（生产 compose 已挂载该目录）。
 
 ## Linux 部署（Docker Compose）
 
@@ -124,14 +155,16 @@ docker compose -f docker-compose.prod.yml up -d --build
 ## 已实现（MVP / P0）
 
 - 登录、会话恢复、刷新、改密、退出；登录失败限流
-- 两级分类（合同审查 / 诉讼仲裁 / 合规咨询 / 公司治理）与分类管理（删除保护）
+- 一级分类（扁平结构）与分类管理（删除保护、拖拽排序）
 - 自定义字段模板：分组（基础信息 / 过程信息 / 结果信息）、类型、必填、选项；公共字段「状态」「截止日期」锁定
-- 工作记录 CRUD、动态分组表单、级联分类、知识库关联、状态/关键字/区间筛选、分页、逾期识别
+- 工作记录 CRUD、动态分组表单、知识库关联、状态/关键字/区间筛选、分页、逾期识别
+- 桌面便签：随手记、行内编辑、勾选后 AI 建议归类转工作记录、撤销归档；设置中心「便签 AI 归类」开关
 - 工作汇总仪表盘：周期切换（周/月/季/年/自定义）、5 张统计卡、分类工作量、在办状态分布、工作量走势
 - 报表生成（日/周/月/季/年）与服务端 Markdown 导出
 - 知识库连接器（Obsidian 只读索引 / IMA 预留）、增量重建、检索高亮、引用到记录、原文查看
 - 法务对话：会话管理、SSE 流式、知识库与记忆开关、引用标签、记忆画像沉淀/删除/清空
-- 设置：脱敏开关、模型配置与连通性测试、隐私/协议/第三方清单、数据导出、清空数据
+- Windows 桌面客户端：独立便签窗、托盘、开机自启、服务器地址配置页
+- 设置：脱敏开关、默认模型、便签 AI 开关、模型配置与连通性测试、隐私/协议/第三方清单、数据导出、清空数据
 
 ## 测试与质量
 
@@ -161,4 +194,13 @@ pnpm test        # 后端 12 项 API 测试 + 前端 4 项组件/工具测试
 - 腾讯 IMA 连接器为预留位，需其开放接口或导出导入降级
 - 工作记录 ↔ 知识库的双向反链、字段模板版本化
 - 对话记忆的语义聚类与画像可视化
-- 前端首屏包体约 1.25 MB（ECharts 已拆包懒加载），后续可按路由进一步拆分
+- 桌面客户端仅支持 Windows（macOS/Linux 可直接用浏览器访问 Web 端）
+- 便签 AI 归类依赖已配置的 LLM Key，未配置时自动降级为人工填写
+
+## 参与贡献
+
+欢迎 Issue 与 PR，流程与规范见 [CONTRIBUTING.md](CONTRIBUTING.md)；安全漏洞请勿公开提交，见 [SECURITY.md](SECURITY.md)；变更历史见 [CHANGELOG.md](CHANGELOG.md)。
+
+## 开源许可
+
+本项目基于 [MIT License](LICENSE) 开源。
