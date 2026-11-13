@@ -26,8 +26,9 @@ const reorderSchema = z.object({
 
 categoriesRouter.get(
   '/',
-  asyncHandler(async (_req, res) => {
-    const items = await listCategoriesWithCounts();
+  asyncHandler(async (req, res) => {
+    const userId = req.auth!.userId;
+    const items = await listCategoriesWithCounts(userId);
     res.status(200).json({
       items: items.map((category) => serializeCategoryWithCount(category, category.recordCount))
     });
@@ -37,9 +38,13 @@ categoriesRouter.get(
 categoriesRouter.patch(
   '/reorder',
   asyncHandler(async (req, res) => {
+    const userId = req.auth!.userId;
     const { ids } = reorderSchema.parse(req.body);
     const uniqueIds = new Set(ids);
-    const existing = await prisma.category.findMany({ select: { id: true } });
+    const existing = await prisma.category.findMany({
+      where: { userId },
+      select: { id: true }
+    });
 
     if (
       uniqueIds.size !== ids.length ||
@@ -51,11 +56,11 @@ categoriesRouter.patch(
 
     await prisma.$transaction(
       ids.map((id, index) =>
-        prisma.category.update({ where: { id }, data: { sort: index } })
+        prisma.category.updateMany({ where: { id, userId }, data: { sort: index } })
       )
     );
 
-    const items = await listCategoriesWithCounts();
+    const items = await listCategoriesWithCounts(userId);
     res.status(200).json({
       items: items.map((category) => serializeCategoryWithCount(category, category.recordCount))
     });
@@ -65,15 +70,22 @@ categoriesRouter.patch(
 categoriesRouter.post(
   '/',
   asyncHandler(async (req, res) => {
+    const userId = req.auth!.userId;
     const body = createSchema.parse(req.body);
 
-    const duplicate = await prisma.category.findUnique({ where: { name: body.name } });
+    const duplicate = await prisma.category.findFirst({
+      where: { userId, name: body.name }
+    });
     if (duplicate) throw conflict('分类名称已存在');
 
-    const maxSort = await prisma.category.aggregate({ _max: { sort: true } });
+    const maxSort = await prisma.category.aggregate({
+      where: { userId },
+      _max: { sort: true }
+    });
 
     const category = await prisma.category.create({
       data: {
+        userId,
         name: body.name,
         sort: (maxSort._max.sort ?? -1) + 1
       }
@@ -86,13 +98,16 @@ categoriesRouter.post(
 categoriesRouter.patch(
   '/:id',
   asyncHandler(async (req, res) => {
+    const userId = req.auth!.userId;
     const body = patchSchema.parse(req.body);
-    const existing = await prisma.category.findUnique({ where: { id: req.params.id } });
+    const existing = await prisma.category.findFirst({
+      where: { id: req.params.id, userId }
+    });
     if (!existing) throw notFound('分类不存在');
 
     if (body.name !== undefined && body.name !== existing.name) {
       const duplicate = await prisma.category.findFirst({
-        where: { name: body.name, NOT: { id: existing.id } }
+        where: { userId, name: body.name, NOT: { id: existing.id } }
       });
       if (duplicate) throw conflict('分类名称已存在');
     }
@@ -104,7 +119,7 @@ categoriesRouter.patch(
         ...(body.sort !== undefined ? { sort: body.sort } : {})
       }
     });
-    const recordCount = await countForCategory(category.id);
+    const recordCount = await countForCategory(category.id, userId);
     res.status(200).json({ category: serializeCategoryWithCount(category, recordCount) });
   })
 );
@@ -112,8 +127,9 @@ categoriesRouter.patch(
 categoriesRouter.delete(
   '/:id',
   asyncHandler(async (req, res) => {
-    const existing = await prisma.category.findUnique({
-      where: { id: req.params.id },
+    const userId = req.auth!.userId;
+    const existing = await prisma.category.findFirst({
+      where: { id: req.params.id, userId },
       include: { _count: { select: { records: true } } }
     });
     if (!existing) throw notFound('分类不存在');

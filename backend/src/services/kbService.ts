@@ -97,9 +97,9 @@ function buildExcerpt(content: string, lowerContent: string, needle: string, lim
   return `${start > 0 ? '…' : ''}${content.slice(start, end)}${end < content.length ? '…' : ''}`;
 }
 
-async function searchImaConnectors(query: string): Promise<KbSearchResult[]> {
+async function searchImaConnectors(query: string, userId: string): Promise<KbSearchResult[]> {
   const connectors = await prisma.kbConnector.findMany({
-    where: { type: 'ima', status: 'on' },
+    where: { type: 'ima', status: 'on', userId },
     select: { id: true, name: true, credentialEnc: true, configJson: true }
   });
 
@@ -137,7 +137,10 @@ async function searchImaConnectors(query: string): Promise<KbSearchResult[]> {
   return items;
 }
 
-export async function searchKb(rawQuery: string): Promise<{ items: KbSearchResult[]; took: number }> {
+export async function searchKb(
+  rawQuery: string,
+  userId: string
+): Promise<{ items: KbSearchResult[]; took: number }> {
   const startedAt = Date.now();
   const query = rawQuery.trim();
   if (!query) {
@@ -149,9 +152,10 @@ export async function searchKb(rawQuery: string): Promise<{ items: KbSearchResul
   const phrase = cleanedQuery;
   const [docs, imaItems] = await Promise.all([
     prisma.kbDoc.findMany({
+      where: { userId },
       select: { id: true, title: true, path: true, content: true }
     }),
-    searchImaConnectors(query)
+    searchImaConnectors(query, userId)
   ]);
 
   const items: KbSearchResult[] = [...imaItems];
@@ -269,8 +273,8 @@ async function reindexImaConnector(connector: { id: string; credentialEnc: strin
   };
 }
 
-export async function reindexConnector(connectorId: string) {
-  const connector = await prisma.kbConnector.findUnique({ where: { id: connectorId } });
+export async function reindexConnector(connectorId: string, userId: string) {
+  const connector = await prisma.kbConnector.findFirst({ where: { id: connectorId, userId } });
   if (!connector) return null;
 
   if (connector.type === 'ima') {
@@ -309,7 +313,7 @@ export async function reindexConnector(connectorId: string) {
       });
       if (!existing) {
         await prisma.kbDoc.create({
-          data: { connectorId, title, path: file, content }
+          data: { connectorId, userId: connector.userId, title, path: file, content }
         });
         updated += 1;
       } else if (existing.title !== title || existing.content !== content) {

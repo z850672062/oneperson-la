@@ -143,6 +143,7 @@
 3. **记忆画像提前交付**：P1 的“类扣子记忆模块”已实现基础版（对话沉淀记忆条目、查看/删除/清空），后续再做语义聚类与画像可视化。
 4. **桌面客户端**：原 PRD 未规划桌面端，MVP 后追加 Tauri 薄客户端（见 4.1 v0.4 两行）；其打包流程与已知坑位沉淀于 `docs/桌面版应用打包指南.md`。
 5. **便签 AI 归类开关**：新增设置项 `stickyAiSuggest`（默认开启），作为“AI 可进可退”原则在便签场景的落地。
+6. **多账号数据隔离（开源准备）**：原“单人使用、数据全局共享”的设计已升级为按用户隔离——Category/FieldDef/Record/StickyNote/KbConnector/KbDoc/ChatSession/MemoryItem/Report/LlmModel 均增加 userId 并按登录用户过滤；Setting 改为每用户一行（id 即 userId）；存量数据迁移时回填给最早注册的用户。开源种子提供演示账号 `demo / Demo123456`，其数据与个人账号完全隔离。
 
 ---
 

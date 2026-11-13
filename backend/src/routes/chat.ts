@@ -27,6 +27,7 @@ import {
   MAX_ATTACHMENT_TOTAL_TEXT,
   parseAttachment
 } from '../services/attachmentService';
+import { getSettings } from './settings';
 
 export const chatRouter = Router();
 
@@ -73,15 +74,16 @@ const messageSchema = z.object({
   images: z.array(imageSchema).max(4, '单条消息最多携带 4 张图片').optional().default([])
 });
 
-async function defaultModel(): Promise<string> {
-  const setting = await prisma.setting.findUnique({ where: { id: 'default' } });
+async function defaultModel(userId: string): Promise<string> {
+  const setting = await prisma.setting.findUnique({ where: { id: userId } });
   return setting?.defaultModel || 'deepseek-chat';
 }
 
 chatRouter.get(
   '/sessions',
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
     const items = await prisma.chatSession.findMany({
+      where: { userId: req.auth!.userId },
       orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }]
     });
     res.status(200).json({ items: items.map(serializeSession) });
@@ -91,9 +93,10 @@ chatRouter.get(
 chatRouter.post(
   '/sessions',
   asyncHandler(async (req, res) => {
+    const userId = req.auth!.userId;
     const body = createSessionSchema.parse(req.body ?? {});
     const session = await prisma.chatSession.create({
-      data: { title: '新会话', model: body.model || (await defaultModel()) }
+      data: { userId, title: '新会话', model: body.model || (await defaultModel(userId)) }
     });
     res.status(201).json({ session: serializeSession(session) });
   })
@@ -102,7 +105,9 @@ chatRouter.post(
 chatRouter.delete(
   '/sessions/:id',
   asyncHandler(async (req, res) => {
-    const session = await prisma.chatSession.findUnique({ where: { id: req.params.id } });
+    const session = await prisma.chatSession.findFirst({
+      where: { id: req.params.id, userId: req.auth!.userId }
+    });
     if (!session) throw notFound('会话不存在');
     await prisma.chatSession.delete({ where: { id: session.id } });
     res.status(204).end();
@@ -134,7 +139,9 @@ chatRouter.post(
 chatRouter.get(
   '/sessions/:id/messages',
   asyncHandler(async (req, res) => {
-    const session = await prisma.chatSession.findUnique({ where: { id: req.params.id } });
+    const session = await prisma.chatSession.findFirst({
+      where: { id: req.params.id, userId: req.auth!.userId }
+    });
     if (!session) throw notFound('会话不存在');
     const items = await prisma.chatMessage.findMany({
       where: { sessionId: session.id },
@@ -147,12 +154,15 @@ chatRouter.get(
 chatRouter.post(
   '/sessions/:id/messages',
   asyncHandler(async (req, res) => {
+    const userId = req.auth!.userId;
     const body = messageSchema.parse(req.body);
-    const session = await prisma.chatSession.findUnique({ where: { id: req.params.id } });
+    const session = await prisma.chatSession.findFirst({
+      where: { id: req.params.id, userId }
+    });
     if (!session) throw notFound('会话不存在');
 
     const [setting] = await Promise.all([
-      prisma.setting.findUnique({ where: { id: 'default' } }).catch(() => null),
+      getSettings(userId).catch(() => null),
       prisma.chatMessage.create({
         data: { sessionId: session.id, role: 'user', content: body.content }
       })
@@ -160,7 +170,7 @@ chatRouter.post(
     const maskSensitive = Boolean(setting?.maskSensitive);
     const maskLlm = Boolean(setting?.maskLlm);
 
-    const context = await buildChatContext(body.content, body.useKb, body.useMemory);
+    const context = await buildChatContext(body.content, body.useKb, body.useMemory, userId);
     const history = await prisma.chatMessage.findMany({
       where: { sessionId: session.id },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -206,7 +216,7 @@ chatRouter.post(
       }
     }
 
-    const resolved = await resolveChatModel(session.model);
+    const resolved = await resolveChatModel(session.model, userId);
 
     // 联网检索：DeepSeek 提供 Search / Fetch 工具接口，需使用 DeepSeek Key
     let webSources: WebSource[] = [];
@@ -285,7 +295,7 @@ chatRouter.post(
               // 执行每个 tool_call
               for (const call of upstream.finalToolCalls) {
                 sseWrite(res, 'tool_call', { id: call.id, name: call.name, arguments: call.arguments });
-                const result = await executeToolCall(call);
+                const result = await executeToolCall(call, userId);
                 if (result.ok) {
                   sseWrite(res, 'tool_result', { id: call.id, name: call.name, content: result.content });
                 } else {
@@ -368,7 +378,7 @@ chatRouter.post(
         where: { id: session.id },
         data: { title: title || '新会话', updatedAt: new Date() }
       });
-      await rememberFromChat(body.content);
+      await rememberFromChat(userId, body.content);
 
       res.end();
     } catch {

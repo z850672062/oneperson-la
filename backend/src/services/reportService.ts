@@ -14,11 +14,11 @@ function mdCell(value: string | number | null | undefined): string {
   return String(value ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 }
 
-export async function generateReportMarkdown(type: ReportType, range: DateRange) {
+export async function generateReportMarkdown(type: ReportType, range: DateRange, userId: string) {
   const [summary, records] = await Promise.all([
-    buildDashboardSummary(range),
+    buildDashboardSummary(range, userId),
     prisma.record.findMany({
-      where: { createdAt: { gte: range.from, lte: range.to } },
+      where: { userId, createdAt: { gte: range.from, lte: range.to } },
       include: { category: true },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
     })

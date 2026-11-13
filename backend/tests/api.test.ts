@@ -355,4 +355,44 @@ describe('OnePerson_LA API', () => {
     );
     expect(legacyDoc.status).toBe(422);
   });
+
+  it('多账号数据隔离：账号间互不可见', async () => {
+    // 账号 A 已创建过记录与分类；账号 B 登录后应看不到 A 的任何数据
+    const login = await request(app)
+      .post('/api/auth/login')
+      .send({ username: 'other@legal.local', password: 'Legal1234' });
+    expect(login.status).toBe(200);
+    const tokenB = login.body.accessToken;
+    const authB = (req: request.Test) => req.set('Authorization', `Bearer ${tokenB}`);
+
+    const recordsB = await authB(request(app).get('/api/records'));
+    expect(recordsB.status).toBe(200);
+    expect(recordsB.body.items).toEqual([]);
+    expect(recordsB.body.total).toBe(0);
+
+    const categoriesB = await authB(request(app).get('/api/categories'));
+    expect(categoriesB.status).toBe(200);
+    expect(categoriesB.body.items.map((c: { id: string }) => c.id)).toEqual(['t-b-contract']);
+
+    // A 的记录 ID 对 B 不可访问
+    const createdA = await auth(request(app).post('/api/records')).send({
+      categoryId: 't-contract',
+      dueDate: toDateOnly(new Date()),
+      name: '隔离验证用记录'
+    });
+    expect(createdA.status).toBe(201);
+    const recordAId = createdA.body.record.id as string;
+    const detailB = await authB(request(app).get(`/api/records/${recordAId}`));
+    expect(detailB.status).toBe(404);
+
+    // B 无法删除 A 的记录，也无法在 A 的分类下创建记录
+    const deleteB = await authB(request(app).delete(`/api/records/${recordAId}`));
+    expect(deleteB.status).toBe(404);
+    const createB = await authB(request(app).post('/api/records')).send({
+      categoryId: 't-contract',
+      dueDate: toDateOnly(new Date()),
+      name: '越权创建'
+    });
+    expect([403, 404]).toContain(createB.status);
+  });
 });

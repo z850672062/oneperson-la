@@ -21,6 +21,16 @@ model User {
   updatedAt    DateTime         @updatedAt
   sessions     RefreshSession[]
   consents     Consent[]
+  categories   Category[]
+  fields       FieldDef[]
+  records      Record[]
+  stickyNotes  StickyNote[]
+  kbConnectors KbConnector[]
+  kbDocs       KbDoc[]
+  chatSessions ChatSession[]
+  memories     MemoryItem[]
+  reports      Report[]
+  llmModels    LlmModel[]
 }
 
 // refresh token 只存 sha256 哈希，可吊销
@@ -36,39 +46,48 @@ model RefreshSession {
   @@index([userId])
 }
 
-// 一级分类（原两级结构已扁平化，分类名全局唯一）
+// 一级分类（原两级结构已扁平化，分类名在同一用户内唯一）
 model Category {
   id        String      @id @default(cuid())
-  name      String      @unique
+  userId    String
+  name      String
   sort      Int         @default(0)
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   fields    FieldDef[]
   records   Record[]
+
+  @@unique([userId, name])
+  @@index([userId])
 }
 
 // 字段模板；公共字段 status/dueDate 不入库，由接口以 isCommon:true 追加
 model FieldDef {
-  id         String   @id @default(cuid())
-  categoryId String
-  name       String
-  group      String
-  type       String
-  required   Boolean  @default(false)
-  optionsJson String? @db.Text
-  note       String?
-  sort       Int      @default(0)
-  isCommon   Boolean  @default(false)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  id          String   @id @default(cuid())
+  categoryId  String
+  userId      String
+  name        String
+  group       String
+  type        String
+  required    Boolean  @default(false)
+  optionsJson String?  @db.Text
+  note        String?
+  sort        Int      @default(0)
+  isCommon    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  category    Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([categoryId])
+  @@index([userId])
 }
 
 // 工作记录；动态字段值以 JSON 字符串保存在 valuesJson
 model Record {
   id         String     @id @default(cuid())
+  userId     String
   categoryId String
   subType    String     @default("") @db.VarChar(40)
   name       String
@@ -80,6 +99,7 @@ model Record {
   valuesJson String     @db.Text
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   category   Category   @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   kbLinks    RecordKb[]
 
@@ -88,11 +108,13 @@ model Record {
   @@index([status])
   @@index([dueDate])
   @@index([createdAt])
+  @@index([userId])
 }
 
 // 便签：一行一条；勾选后由 AI 建议归类并转为工作记录
 model StickyNote {
   id         String    @id @default(cuid())
+  userId     String
   content    String    @db.VarChar(500)
   done       Boolean   @default(false)
   categoryId String?
@@ -100,8 +122,10 @@ model StickyNote {
   doneAt     DateTime?
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([done, createdAt])
+  @@index([userId])
 }
 
 // 记录与知识库文档多对多
@@ -118,6 +142,7 @@ model RecordKb {
 
 model KbConnector {
   id            String   @id @default(cuid())
+  userId        String
   name          String
   type          String
   status        String   @default("off")
@@ -129,31 +154,41 @@ model KbConnector {
   configJson    String?  @db.Text
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   docs          KbDoc[]
+
+  @@index([userId])
 }
 
 model KbDoc {
   id          String       @id @default(cuid())
   connectorId String?
+  userId      String
   title       String
   path        String       @default("") @db.VarChar(512)
   content     String       @db.MediumText
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   connector   KbConnector? @relation(fields: [connectorId], references: [id], onDelete: SetNull)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   records     RecordKb[]
 
   @@unique([connectorId, path])
   @@index([title])
+  @@index([userId])
 }
 
 model ChatSession {
   id        String        @id @default(cuid())
+  userId    String
   title     String        @default("新会话")
   model     String
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages  ChatMessage[]
+
+  @@index([userId])
 }
 
 model ChatMessage {
@@ -168,30 +203,38 @@ model ChatMessage {
   @@index([sessionId, createdAt])
 }
 
-// 记忆画像条目；text 唯一用于去重
+// 记忆画像条目；同一用户内 text 唯一用于去重
 model MemoryItem {
   id        String   @id @default(cuid())
-  text      String   @unique
+  userId    String
+  text      String
   source    String   @default("chat")
   weight    Float    @default(1)
   createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, text])
+  @@index([userId])
 }
 
 model Report {
   id        String   @id @default(cuid())
+  userId    String
   type      String
   title     String
   rangeFrom DateTime
   rangeTo   DateTime
   markdown  String   @db.MediumText
   createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([createdAt])
+  @@index([userId])
 }
 
-// 单例设置（id 固定为 default）
+// 每用户一行设置；id 即 userId（无外键约束，由业务层保证）
 model Setting {
-  id              String   @id @default("default")
+  id              String   @id
   maskSensitive   Boolean  @default(true)
   maskLlm         Boolean  @default(true)
   defaultModel    String   @default("deepseek-chat")
@@ -201,9 +244,10 @@ model Setting {
   updatedAt       DateTime @updatedAt
 }
 
-// API Key 仅以 AES-256-GCM 密文存储
+// API Key 仅以 AES-256-GCM 密文存储（按用户隔离）
 model LlmModel {
   id         String   @id @default(cuid())
+  userId     String
   vendor     String
   model      String
   baseUrl    String?  @db.VarChar(512)
@@ -211,8 +255,10 @@ model LlmModel {
   isDefault  Boolean  @default(false)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([vendor, model])
+  @@unique([userId, vendor, model])
+  @@index([userId])
 }
 
 model Consent {

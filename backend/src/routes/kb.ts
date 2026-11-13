@@ -32,16 +32,19 @@ const patchSchema = z.object({
   apiKey: z.string().trim().min(1).max(500).optional()
 });
 
-async function getConnector(id: string) {
-  const connector = await prisma.kbConnector.findUnique({ where: { id } });
+async function getConnector(id: string, userId: string) {
+  const connector = await prisma.kbConnector.findFirst({ where: { id, userId } });
   if (!connector) throw notFound('连接器不存在');
   return connector;
 }
 
 kbRouter.get(
   '/connectors',
-  asyncHandler(async (_req, res) => {
-    const items = await prisma.kbConnector.findMany({ orderBy: [{ createdAt: 'asc' }] });
+  asyncHandler(async (req, res) => {
+    const items = await prisma.kbConnector.findMany({
+      where: { userId: req.auth!.userId },
+      orderBy: [{ createdAt: 'asc' }]
+    });
     res.status(200).json({ items: items.map(serializeConnector) });
   })
 );
@@ -49,6 +52,7 @@ kbRouter.get(
 kbRouter.post(
   '/connectors',
   asyncHandler(async (req, res) => {
+    const userId = req.auth!.userId;
     const body = createSchema.parse(req.body);
     if (body.type === 'ima' && (!body.clientId || !body.apiKey)) {
       throw validationError('IMA 连接器需要填写 Client ID 与 API Key');
@@ -58,6 +62,7 @@ kbRouter.post(
     }
     const connector = await prisma.kbConnector.create({
       data: {
+        userId,
         name: body.name,
         type: body.type,
         path: body.type === 'ima' ? '' : body.path,
@@ -80,7 +85,7 @@ kbRouter.patch(
   '/connectors/:id',
   asyncHandler(async (req, res) => {
     const body = patchSchema.parse(req.body);
-    const existing = await getConnector(req.params.id);
+    const existing = await getConnector(req.params.id, req.auth!.userId);
     const hasCredentials = Boolean(body.clientId && body.apiKey);
     if ((body.clientId && !body.apiKey) || (!body.clientId && body.apiKey)) {
       throw validationError('Client ID 与 API Key 需要同时填写');
@@ -113,7 +118,7 @@ kbRouter.patch(
 kbRouter.post(
   '/connectors/:id/connect',
   asyncHandler(async (req, res) => {
-    const existing = await getConnector(req.params.id);
+    const existing = await getConnector(req.params.id, req.auth!.userId);
     if (existing.type === 'ima') {
       const credentials = readImaCredentials(existing.credentialEnc);
       if (!credentials) throw validationError('请先配置 IMA 的 Client ID 与 API Key');
@@ -158,7 +163,7 @@ kbRouter.post(
 kbRouter.post(
   '/connectors/:id/reindex',
   asyncHandler(async (req, res) => {
-    const result = await reindexConnector(req.params.id);
+    const result = await reindexConnector(req.params.id, req.auth!.userId);
     if (!result) throw notFound('连接器不存在');
     res.status(200).json(result);
   })
@@ -168,7 +173,7 @@ kbRouter.get(
   '/search',
   asyncHandler(async (req, res) => {
     const q = typeof req.query.q === 'string' ? req.query.q : '';
-    const result = await searchKb(q);
+    const result = await searchKb(q, req.auth!.userId);
     res.status(200).json({
       items: result.items.map(({ excerpt: _excerpt, ...rest }) => rest),
       took: result.took
@@ -196,7 +201,9 @@ kbRouter.get(
       });
       return;
     }
-    const doc = await prisma.kbDoc.findUnique({ where: { id: req.params.id } });
+    const doc = await prisma.kbDoc.findFirst({
+      where: { id: req.params.id, userId: req.auth!.userId }
+    });
     if (!doc) throw notFound('文档不存在');
     res.status(200).json({ doc: serializeDoc(doc) });
   })

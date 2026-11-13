@@ -25,8 +25,8 @@ function serializeNote(note: StickyNote) {
   };
 }
 
-async function findNote(id: string): Promise<StickyNote> {
-  const note = await prisma.stickyNote.findUnique({ where: { id } });
+async function findNote(id: string, userId: string): Promise<StickyNote> {
+  const note = await prisma.stickyNote.findFirst({ where: { id, userId } });
   if (!note) throw notFound('便签不存在');
   return note;
 }
@@ -79,8 +79,12 @@ function extractJson(text: string): string {
 }
 
 /** 调用默认模型做一次非流式补全；任何失败都返回 null，由调用方降级 */
-async function callLlmJson(system: string, user: string): Promise<LlmSuggestion | null> {
-  const resolved = await resolveChatModel('');
+async function callLlmJson(
+  system: string,
+  user: string,
+  userId: string
+): Promise<LlmSuggestion | null> {
+  const resolved = await resolveChatModel('', userId);
   if (!resolved) return null;
 
   const controller = new AbortController();
@@ -121,9 +125,10 @@ async function callLlmJson(system: string, user: string): Promise<LlmSuggestion 
 stickyNotesRouter.get(
   '/',
   asyncHandler(async (req, res) => {
+    const userId = req.auth!.userId;
     const archived = String(req.query.archived ?? '') === 'true';
     const items = await prisma.stickyNote.findMany({
-      where: archived ? { done: true } : { done: false },
+      where: { userId, ...(archived ? { done: true } : { done: false }) },
       orderBy: archived ? [{ doneAt: 'desc' }] : [{ createdAt: 'desc' }],
       take: 200
     });
@@ -135,8 +140,9 @@ stickyNotesRouter.get(
 stickyNotesRouter.post(
   '/',
   asyncHandler(async (req, res) => {
+    const userId = req.auth!.userId;
     const body = createSchema.parse(req.body);
-    const note = await prisma.stickyNote.create({ data: { content: body.content } });
+    const note = await prisma.stickyNote.create({ data: { userId, content: body.content } });
     res.status(201).json({ note: serializeNote(note) });
   })
 );
@@ -145,8 +151,9 @@ stickyNotesRouter.post(
 stickyNotesRouter.patch(
   '/:id',
   asyncHandler(async (req, res) => {
+    const userId = req.auth!.userId;
     const body = patchSchema.parse(req.body);
-    await findNote(req.params.id);
+    await findNote(req.params.id, userId);
     const note = await prisma.stickyNote.update({
       where: { id: req.params.id },
       data: { content: body.content }
@@ -159,7 +166,8 @@ stickyNotesRouter.patch(
 stickyNotesRouter.delete(
   '/:id',
   asyncHandler(async (req, res) => {
-    await findNote(req.params.id);
+    const userId = req.auth!.userId;
+    await findNote(req.params.id, userId);
     await prisma.stickyNote.delete({ where: { id: req.params.id } });
     res.json({ ok: true });
   })
@@ -169,8 +177,10 @@ stickyNotesRouter.delete(
 stickyNotesRouter.post(
   '/:id/suggest',
   asyncHandler(async (req, res) => {
-    const note = await findNote(req.params.id);
+    const userId = req.auth!.userId;
+    const note = await findNote(req.params.id, userId);
     const categories = await prisma.category.findMany({
+      where: { userId },
       select: { id: true, name: true },
       orderBy: [{ sort: 'asc' }, { name: 'asc' }]
     });
@@ -204,7 +214,7 @@ stickyNotesRouter.post(
       categoryList
     ].join('\n');
 
-    const raw = await callLlmJson(system, note.content);
+    const raw = await callLlmJson(system, note.content, userId);
 
     const fallbackCategory =
       categories.find((c) => c.name === raw?.categoryName) ??
@@ -242,11 +252,12 @@ stickyNotesRouter.post(
 stickyNotesRouter.post(
   '/:id/convert',
   asyncHandler(async (req, res) => {
+    const userId = req.auth!.userId;
     const body = convertSchema.parse(req.body);
-    const note = await findNote(req.params.id);
+    const note = await findNote(req.params.id, userId);
     if (note.done) throw validationError('该便签已归档，请先撤销再操作');
 
-    const category = await prisma.category.findUnique({ where: { id: body.categoryId } });
+    const category = await prisma.category.findFirst({ where: { id: body.categoryId, userId } });
     if (!category) throw validationError('分类不存在，请重新选择');
 
     const title = (body.title ?? note.content).trim().slice(0, 200);
@@ -254,6 +265,7 @@ stickyNotesRouter.post(
 
     const record = await prisma.record.create({
       data: {
+        userId: note.userId,
         categoryId: category.id,
         name: title,
         sub: '',
@@ -288,12 +300,13 @@ stickyNotesRouter.post(
 stickyNotesRouter.post(
   '/:id/revert',
   asyncHandler(async (req, res) => {
-    const note = await findNote(req.params.id);
+    const userId = req.auth!.userId;
+    const note = await findNote(req.params.id, userId);
     if (!note.done) throw validationError('该便签尚未归档，无需撤销');
 
     if (note.recordId) {
       // 仅删除由该便签生成的记录；若已被手动删除则忽略
-      await prisma.record.deleteMany({ where: { id: note.recordId } });
+      await prisma.record.deleteMany({ where: { id: note.recordId, userId } });
     }
 
     const updated = await prisma.stickyNote.update({

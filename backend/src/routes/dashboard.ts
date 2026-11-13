@@ -28,7 +28,7 @@ dashboardRouter.get(
       throw validationError(error instanceof Error ? error.message : '日期区间无效');
     }
 
-    const summary = await buildDashboardSummary(range);
+    const summary = await buildDashboardSummary(range, req.auth!.userId);
     res.status(200).json(summary);
   })
 );

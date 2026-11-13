@@ -285,9 +285,9 @@ async function main() {
     }
   });
 
-  // 开源演示账号：用于 README 快速开始，与个人风格账号分离
+  // 开源演示账号：用于 README 快速开始，所有演示数据归属该账号
   const demoPasswordHash = await bcrypt.hash('Demo123456', 10);
-  await prisma.user.upsert({
+  const demo = await prisma.user.upsert({
     where: { email: 'demo@oneperson.local' },
     update: { username: 'demo', name: '演示用户', passwordHash: demoPasswordHash },
     create: {
@@ -298,12 +298,13 @@ async function main() {
       passwordHash: demoPasswordHash
     }
   });
+  const ownerId = demo.id;
 
   for (const category of categories) {
     await prisma.category.upsert({
       where: { id: category.id },
-      update: { name: category.name, sort: category.sort },
-      create: category
+      update: { userId: ownerId, name: category.name, sort: category.sort },
+      create: { ...category, userId: ownerId }
     });
   }
 
@@ -311,6 +312,7 @@ async function main() {
     await prisma.fieldDef.upsert({
       where: { id: field.id },
       update: {
+        userId: ownerId,
         categoryId: field.categoryId,
         name: field.name,
         group: field.group,
@@ -322,6 +324,7 @@ async function main() {
       },
       create: {
         id: field.id,
+        userId: ownerId,
         categoryId: field.categoryId,
         name: field.name,
         group: field.group,
@@ -338,6 +341,7 @@ async function main() {
   await prisma.kbConnector.upsert({
     where: { id: 'conn-obsidian' },
     update: {
+      userId: ownerId,
       name: 'Obsidian 本地库',
       type: 'obsidian',
       status: 'on',
@@ -348,6 +352,7 @@ async function main() {
     },
     create: {
       id: 'conn-obsidian',
+      userId: ownerId,
       name: 'Obsidian 本地库',
       type: 'obsidian',
       status: 'on',
@@ -359,9 +364,10 @@ async function main() {
   });
   await prisma.kbConnector.upsert({
     where: { id: 'conn-ima' },
-    update: { name: '腾讯 IMA', type: 'ima', status: 'off', path: '' },
+    update: { userId: ownerId, name: '腾讯 IMA', type: 'ima', status: 'off', path: '' },
     create: {
       id: 'conn-ima',
+      userId: ownerId,
       name: '腾讯 IMA',
       type: 'ima',
       status: 'off',
@@ -374,6 +380,7 @@ async function main() {
     await prisma.kbDoc.upsert({
       where: { id: doc.id },
       update: {
+        userId: ownerId,
         connectorId: 'conn-obsidian',
         title: doc.title,
         path: doc.path,
@@ -381,6 +388,7 @@ async function main() {
       },
       create: {
         id: doc.id,
+        userId: ownerId,
         connectorId: 'conn-obsidian',
         title: doc.title,
         path: doc.path,
@@ -391,6 +399,7 @@ async function main() {
 
   for (const record of records) {
     const data = {
+      userId: ownerId,
       categoryId: record.categoryId,
       subType: record.subType,
       name: record.name,
@@ -424,22 +433,23 @@ async function main() {
   for (const memory of memories) {
     await prisma.memoryItem.upsert({
       where: { id: memory.id },
-      update: { text: memory.text, source: memory.source, weight: memory.weight },
-      create: memory
+      update: { userId: ownerId, text: memory.text, source: memory.source, weight: memory.weight },
+      create: { ...memory, userId: ownerId }
     });
   }
 
   await prisma.setting.upsert({
-    where: { id: 'default' },
+    where: { id: ownerId },
     update: { maskSensitive: true, maskLlm: true, defaultModel: 'deepseek-chat' },
-    create: { id: 'default', maskSensitive: true, maskLlm: true, defaultModel: 'deepseek-chat' }
+    create: { id: ownerId, maskSensitive: true, maskLlm: true, defaultModel: 'deepseek-chat' }
   });
 
   await prisma.llmModel.upsert({
-    where: { vendor_model: { vendor: 'deepseek', model: 'deepseek-chat' } },
+    where: { userId_vendor_model: { userId: ownerId, vendor: 'deepseek', model: 'deepseek-chat' } },
     update: { isDefault: true },
     create: {
       id: 'llm-deepseek',
+      userId: ownerId,
       vendor: 'deepseek',
       model: 'deepseek-chat',
       isDefault: true,

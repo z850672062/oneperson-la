@@ -6,10 +6,13 @@ interface CategoryWithCounts extends Category {
   recordCount: number;
 }
 
-export async function listCategoriesWithCounts(): Promise<CategoryWithCounts[]> {
+export async function listCategoriesWithCounts(userId: string): Promise<CategoryWithCounts[]> {
   const [categories, grouped] = await Promise.all([
-    prisma.category.findMany({ orderBy: [{ sort: 'asc' }, { createdAt: 'asc' }] }),
-    prisma.record.groupBy({ by: ['categoryId'], _count: { _all: true } })
+    prisma.category.findMany({
+      where: { userId },
+      orderBy: [{ sort: 'asc' }, { createdAt: 'asc' }]
+    }),
+    prisma.record.groupBy({ by: ['categoryId'], where: { userId }, _count: { _all: true } })
   ]);
 
   const ownCount = new Map(grouped.map((item) => [item.categoryId, item._count._all]));
@@ -19,8 +22,8 @@ export async function listCategoriesWithCounts(): Promise<CategoryWithCounts[]> 
   }));
 }
 
-export async function countForCategory(categoryId: string): Promise<number> {
-  return prisma.record.count({ where: { categoryId } });
+export async function countForCategory(categoryId: string, userId: string): Promise<number> {
+  return prisma.record.count({ where: { categoryId, userId } });
 }
 
 export function serializeCategoryWithCount(category: Category, recordCount: number) {

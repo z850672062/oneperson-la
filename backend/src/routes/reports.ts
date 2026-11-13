@@ -19,6 +19,7 @@ const generateSchema = z.object({
 reportsRouter.post(
   '/generate',
   asyncHandler(async (req, res) => {
+    const userId = req.auth!.userId;
     const body = generateSchema.parse(req.body);
     let range;
     try {
@@ -31,9 +32,10 @@ reportsRouter.post(
       throw validationError(error instanceof Error ? error.message : '报表区间无效');
     }
 
-    const { title, markdown } = await generateReportMarkdown(body.type as ReportType, range);
+    const { title, markdown } = await generateReportMarkdown(body.type as ReportType, range, userId);
     const report = await prisma.report.create({
       data: {
+        userId,
         type: body.type,
         title,
         rangeFrom: range.from,
@@ -47,10 +49,14 @@ reportsRouter.post(
 
 reportsRouter.get(
   '/',
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
+    const userId = req.auth!.userId;
     const [items, total] = await Promise.all([
-      prisma.report.findMany({ orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] }),
-      prisma.report.count()
+      prisma.report.findMany({
+        where: { userId },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
+      }),
+      prisma.report.count({ where: { userId } })
     ]);
     res.status(200).json({ items: items.map(serializeReport), total });
   })
@@ -59,7 +65,9 @@ reportsRouter.get(
 reportsRouter.get(
   '/:id/export',
   asyncHandler(async (req, res) => {
-    const report = await prisma.report.findUnique({ where: { id: req.params.id } });
+    const report = await prisma.report.findFirst({
+      where: { id: req.params.id, userId: req.auth!.userId }
+    });
     if (!report) throw notFound('报表不存在');
     const filename = `report-${report.id}.md`;
     const encodedTitle = encodeURIComponent(`${report.title}.md`);
@@ -75,7 +83,9 @@ reportsRouter.get(
 reportsRouter.get(
   '/:id',
   asyncHandler(async (req, res) => {
-    const report = await prisma.report.findUnique({ where: { id: req.params.id } });
+    const report = await prisma.report.findFirst({
+      where: { id: req.params.id, userId: req.auth!.userId }
+    });
     if (!report) throw notFound('报表不存在');
     res.status(200).json({ report: serializeReport(report) });
   })

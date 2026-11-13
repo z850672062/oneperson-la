@@ -11,10 +11,13 @@ import { serializeLlmModel, serializeSettings } from '../services/serializers';
 export const settingsRouter = Router();
 export const llmRouter = Router();
 
-async function getSettings(): Promise<Setting> {
-  const existing = await prisma.setting.findUnique({ where: { id: 'default' } });
-  if (existing) return existing;
-  return prisma.setting.create({ data: { id: 'default' } });
+export async function getSettings(userId: string): Promise<Setting> {
+  // 每用户一行设置：id 即 userId，get-or-create 由业务层保证
+  return prisma.setting.upsert({
+    where: { id: userId },
+    update: {},
+    create: { id: userId }
+  });
 }
 
 const patchSettingsSchema = z.object({
@@ -26,8 +29,8 @@ const patchSettingsSchema = z.object({
 
 settingsRouter.get(
   '/',
-  asyncHandler(async (_req, res) => {
-    const setting = await getSettings();
+  asyncHandler(async (req, res) => {
+    const setting = await getSettings(req.auth!.userId);
     res.status(200).json(serializeSettings(setting));
   })
 );
@@ -36,9 +39,9 @@ settingsRouter.patch(
   '/',
   asyncHandler(async (req, res) => {
     const body = patchSettingsSchema.parse(req.body);
-    await getSettings();
+    await getSettings(req.auth!.userId);
     const setting = await prisma.setting.update({
-      where: { id: 'default' },
+      where: { id: req.auth!.userId },
       data: {
         ...(body.maskSensitive !== undefined ? { maskSensitive: body.maskSensitive } : {}),
         ...(body.maskLlm !== undefined ? { maskLlm: body.maskLlm } : {}),
@@ -64,8 +67,9 @@ const createModelSchema = z.object({
 
 llmRouter.get(
   '/',
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
     const items = await prisma.llmModel.findMany({
+      where: { userId: req.auth!.userId },
       orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }]
     });
     res.status(200).json({ items: items.map(serializeLlmModel) });
@@ -75,18 +79,20 @@ llmRouter.get(
 llmRouter.post(
   '/',
   asyncHandler(async (req, res) => {
+    const userId = req.auth!.userId;
     const body = createModelSchema.parse(req.body);
-    const duplicate = await prisma.llmModel.findUnique({
-      where: { vendor_model: { vendor: body.vendor, model: body.model } }
+    const duplicate = await prisma.llmModel.findFirst({
+      where: { userId, vendor: body.vendor, model: body.model }
     });
     if (duplicate) {
       res.status(409).json({ error: { code: 'CONFLICT', message: '该厂商与模型组合已存在' } });
       return;
     }
 
-    const count = await prisma.llmModel.count();
+    const count = await prisma.llmModel.count({ where: { userId } });
     const created = await prisma.llmModel.create({
       data: {
+        userId,
         vendor: body.vendor,
         model: body.model,
         baseUrl: body.baseUrl?.trim() || null,
@@ -101,7 +107,9 @@ llmRouter.post(
 llmRouter.post(
   '/:id/test',
   asyncHandler(async (req, res) => {
-    const model = await prisma.llmModel.findUnique({ where: { id: req.params.id } });
+    const model = await prisma.llmModel.findFirst({
+      where: { id: req.params.id, userId: req.auth!.userId }
+    });
     if (!model) throw notFound('模型配置不存在');
 
     if (!model.apiKeyEnc) {
@@ -163,12 +171,16 @@ llmRouter.post(
 llmRouter.delete(
   '/:id',
   asyncHandler(async (req, res) => {
-    const model = await prisma.llmModel.findUnique({ where: { id: req.params.id } });
+    const userId = req.auth!.userId;
+    const model = await prisma.llmModel.findFirst({ where: { id: req.params.id, userId } });
     if (!model) throw notFound('模型配置不存在');
     await prisma.llmModel.delete({ where: { id: model.id } });
 
     if (model.isDefault) {
-      const next = await prisma.llmModel.findFirst({ orderBy: { createdAt: 'asc' } });
+      const next = await prisma.llmModel.findFirst({
+        where: { userId },
+        orderBy: { createdAt: 'asc' }
+      });
       if (next) {
         await prisma.llmModel.update({ where: { id: next.id }, data: { isDefault: true } });
       }

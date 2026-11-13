@@ -38,13 +38,20 @@ function roundHours(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-export async function buildDashboardSummary(range: DateRange): Promise<DashboardSummaryResult> {
+export async function buildDashboardSummary(
+  range: DateRange,
+  userId: string
+): Promise<DashboardSummaryResult> {
   const [records, topCategories] = await Promise.all([
     prisma.record.findMany({
-      where: { createdAt: { gte: startOfDay(range.from), lte: endOfDay(range.to) } },
+      where: {
+        userId,
+        createdAt: { gte: startOfDay(range.from), lte: endOfDay(range.to) }
+      },
       include: { category: true }
     }),
     prisma.category.findMany({
+      where: { userId },
       orderBy: [{ sort: 'asc' }, { createdAt: 'asc' }]
     })
   ]);

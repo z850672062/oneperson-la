@@ -21,6 +21,8 @@
 
 > 下表的「类型」列为 Prisma 逻辑类型；物理映射见上表。`TEXT` 短文本（名称、枚举、显示文案等）落库为 `VARCHAR(191)`；仅标注 `VARCHAR(512)` 或 `TEXT` 的长文本列使用对应 MySQL 类型。
 
+> **多账号数据隔离（2026-11-13）**：Category、FieldDef、Record、StickyNote、KbConnector、KbDoc、ChatSession、MemoryItem、Report、LlmModel 均增加 `userId`（NOT NULL，FK → `User.id`，ON DELETE CASCADE）并按登录用户过滤。唯一约束改为用户维度：`Category(userId, name)`、`MemoryItem(userId, text)`、`LlmModel(userId, vendor, model)`。`Setting` 从全局单例（id=`default`）改为每用户一行，`id` 即 `userId`。存量数据由迁移 `20261113120000_add_user_scope` 回填给最早注册的用户。
+
 ### 1.1 User（账号）
 
 | 字段 | 类型 | 约束 | 说明 |
@@ -53,12 +55,13 @@
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
 | id | VARCHAR(191) | PK | |
-| name | VARCHAR(191) | NOT NULL, UNIQUE | 分类名全局唯一 |
+| userId | VARCHAR(191) | NOT NULL, FK → User.id | 归属用户 |
+| name | VARCHAR(191) | NOT NULL | 分类名 |
 | sort | INTEGER | default 0 | 升序 |
 | createdAt / updatedAt | DATETIME | | |
 
 约束与索引：
-- `UNIQUE(name)`：分类名全局唯一，服务层在创建/改名时返回 409 `CATEGORY_CONFLICT`。
+- `UNIQUE(userId, name)`：同一用户内分类名唯一，服务层在创建/改名时返回 409 `CATEGORY_CONFLICT`。
 - 原两级结构已扁平化：二级分类名称迁移为 `Record.subType`（事项类型），侧边栏与分类管理均只展示一级分类。
 
 ### 1.4 FieldDef（字段模板）

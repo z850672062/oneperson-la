@@ -19,22 +19,24 @@ export const userRouter = Router();
 userRouter.get(
   '/export',
   asyncHandler(async (req, res) => {
-    const user = await prisma.user.findUnique({ where: { id: req.auth!.userId } });
+    const userId = req.auth!.userId;
+    const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw unauthorized('用户不存在');
 
     const [categories, fields, records, reports, memory, setting] = await Promise.all([
-      listCategoriesWithCounts(),
-      prisma.fieldDef.findMany({ orderBy: [{ categoryId: 'asc' }, { sort: 'asc' }] }),
+      listCategoriesWithCounts(userId),
+      prisma.fieldDef.findMany({ where: { userId }, orderBy: [{ categoryId: 'asc' }, { sort: 'asc' }] }),
       prisma.record.findMany({
+        where: { userId },
         include: {
           category: true,
           kbLinks: { include: { doc: true } }
         },
         orderBy: [{ createdAt: 'asc' }]
       }),
-      prisma.report.findMany({ orderBy: [{ createdAt: 'asc' }] }),
-      prisma.memoryItem.findMany({ orderBy: [{ createdAt: 'asc' }] }),
-      prisma.setting.findUnique({ where: { id: 'default' } })
+      prisma.report.findMany({ where: { userId }, orderBy: [{ createdAt: 'asc' }] }),
+      prisma.memoryItem.findMany({ where: { userId }, orderBy: [{ createdAt: 'asc' }] }),
+      prisma.setting.findUnique({ where: { id: userId } })
     ]);
 
     const payload = {
@@ -57,18 +59,24 @@ userRouter.get(
 
 userRouter.delete(
   '/data',
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
+    const userId = req.auth!.userId;
+    const sessions = await prisma.chatSession.findMany({ where: { userId }, select: { id: true } });
+    const sessionIds = sessions.map((s) => s.id);
+    const records = await prisma.record.findMany({ where: { userId }, select: { id: true } });
+    const recordIds = records.map((r) => r.id);
     await prisma.$transaction([
-      prisma.recordKb.deleteMany(),
-      prisma.record.deleteMany(),
-      prisma.fieldDef.deleteMany(),
-      prisma.report.deleteMany(),
-      prisma.chatMessage.deleteMany(),
-      prisma.chatSession.deleteMany(),
-      prisma.memoryItem.deleteMany(),
-      prisma.kbDoc.deleteMany(),
-      prisma.kbConnector.deleteMany(),
-      prisma.category.deleteMany()
+      prisma.recordKb.deleteMany({ where: { recordId: { in: recordIds } } }),
+      prisma.record.deleteMany({ where: { userId } }),
+      prisma.fieldDef.deleteMany({ where: { userId } }),
+      prisma.report.deleteMany({ where: { userId } }),
+      prisma.chatMessage.deleteMany({ where: { sessionId: { in: sessionIds } } }),
+      prisma.chatSession.deleteMany({ where: { userId } }),
+      prisma.memoryItem.deleteMany({ where: { userId } }),
+      prisma.stickyNote.deleteMany({ where: { userId } }),
+      prisma.kbDoc.deleteMany({ where: { userId } }),
+      prisma.kbConnector.deleteMany({ where: { userId } }),
+      prisma.category.deleteMany({ where: { userId } })
     ]);
     res.status(204).end();
   })

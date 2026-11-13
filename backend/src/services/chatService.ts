@@ -54,12 +54,14 @@ function sleep(ms: number): Promise<void> {
 export async function buildChatContext(
   content: string,
   useKb: boolean,
-  useMemory: boolean
+  useMemory: boolean,
+  userId: string
 ): Promise<ChatContext> {
   const [search, memories] = await Promise.all([
-    useKb ? searchKb(content) : Promise.resolve({ items: [] as KbSearchResult[], took: 0 }),
+    useKb ? searchKb(content, userId) : Promise.resolve({ items: [] as KbSearchResult[], took: 0 }),
     useMemory
       ? prisma.memoryItem.findMany({
+          where: { userId },
           orderBy: [{ weight: 'desc' }, { createdAt: 'desc' }],
           take: 6
         })
@@ -136,9 +138,13 @@ interface ResolvedModel {
   vendor: string;
 }
 
-export async function resolveChatModel(sessionModel: string): Promise<ResolvedModel | null> {
-  // 不限定厂商：兼容 DeepSeek、火山方舟、OpenAI 等所有 OpenAI 兼容服务
+export async function resolveChatModel(
+  sessionModel: string,
+  userId: string
+): Promise<ResolvedModel | null> {
+  // 不限定厂商：兼容 DeepSeek、火山方舟、OpenAI 等所有 OpenAI 兼容服务（按用户隔离）
   const configs = await prisma.llmModel.findMany({
+    where: { userId },
     orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }]
   });
   // 兼容历史数据：会话里可能存的是模型名，也可能是模型配置 ID

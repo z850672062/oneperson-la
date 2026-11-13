@@ -190,10 +190,10 @@ export const TOOLS_SCHEMA: unknown[] = [
   }
 ];
 
-async function executeSearchRecords(args: Record<string, unknown>): Promise<ToolCallResult> {
-  const where: Record<string, unknown> = {};
+async function executeSearchRecords(args: Record<string, unknown>, userId: string): Promise<ToolCallResult> {
+  const where: Record<string, unknown> = { userId };
   if (typeof args.category === 'string' && args.category.trim()) {
-    const cat = await prisma.category.findFirst({ where: { name: args.category } });
+    const cat = await prisma.category.findFirst({ where: { userId, name: args.category } });
     if (cat) where.categoryId = cat.id;
   }
   if (typeof args.risk === 'string') where.risk = args.risk;
@@ -250,13 +250,13 @@ function parseValuesExcerpt(valuesJson: string): string {
   }
 }
 
-async function executeListUpcoming(args: Record<string, unknown>): Promise<ToolCallResult> {
+async function executeListUpcoming(args: Record<string, unknown>, userId: string): Promise<ToolCallResult> {
   const days = Math.min(Math.max(Number(args.days ?? 7), 1), 30);
   const now = new Date();
   const future = new Date(now.getTime() + days * 86400000);
-  const where: Record<string, unknown> = { dueDate: { gte: now, lte: future } };
+  const where: Record<string, unknown> = { userId, dueDate: { gte: now, lte: future } };
   if (typeof args.category === 'string' && args.category.trim()) {
-    const cat = await prisma.category.findFirst({ where: { name: args.category } });
+    const cat = await prisma.category.findFirst({ where: { userId, name: args.category } });
     if (cat) where.categoryId = cat.id;
   }
   const items = await prisma.record.findMany({
@@ -273,11 +273,11 @@ async function executeListUpcoming(args: Record<string, unknown>): Promise<ToolC
   return { ok: true, content: `未来 ${days} 天共 ${items.length} 条到期：\n${lines.join('\n')}` };
 }
 
-async function executeKbSearch(args: Record<string, unknown>): Promise<ToolCallResult> {
+async function executeKbSearch(args: Record<string, unknown>, userId: string): Promise<ToolCallResult> {
   const query = typeof args.query === 'string' ? args.query.trim() : '';
   if (!query) return { ok: false, content: '', error: 'query 必填' };
   const topK = Math.min(Math.max(Number(args.topK ?? 3), 1), 8);
-  const result = await searchKb(query);
+  const result = await searchKb(query, userId);
   const items = result.items.slice(0, topK);
   if (!items.length) return { ok: true, content: `知识库未命中关于「${query}」的条目。` };
   const lines = items.map((item, i) => {
@@ -286,7 +286,7 @@ async function executeKbSearch(args: Record<string, unknown>): Promise<ToolCallR
   return { ok: true, content: `知识库命中 ${items.length} 条关于「${query}」：\n${lines.join('\n\n')}` };
 }
 
-async function executeGenerateSummary(args: Record<string, unknown>): Promise<ToolCallResult> {
+async function executeGenerateSummary(args: Record<string, unknown>, userId: string): Promise<ToolCallResult> {
   let from: Date;
   let to: Date;
   const period = typeof args.period === 'string' ? args.period : '';
@@ -314,7 +314,7 @@ async function executeGenerateSummary(args: Record<string, unknown>): Promise<To
   }
 
   const items = await prisma.record.findMany({
-    where: { updatedAt: { gte: from, lte: to } },
+    where: { userId, updatedAt: { gte: from, lte: to } },
     orderBy: { updatedAt: 'asc' },
     include: { category: true }
   });
@@ -340,8 +340,11 @@ async function executeGenerateSummary(args: Record<string, unknown>): Promise<To
   return { ok: true, content: lines.join('\n') };
 }
 
-async function executeListCategories(): Promise<ToolCallResult> {
-  const cats = await prisma.category.findMany({ include: { _count: { select: { records: true } } } });
+async function executeListCategories(_args: Record<string, unknown>, userId: string): Promise<ToolCallResult> {
+  const cats = await prisma.category.findMany({
+    where: { userId },
+    include: { _count: { select: { records: true } } }
+  });
   const result = cats.map((c) => `${c.name}: ${c._count.records}`);
   result.sort((a, b) => {
     const na = a.split(': ')[1];
@@ -351,9 +354,10 @@ async function executeListCategories(): Promise<ToolCallResult> {
   return { ok: true, content: result.join('\n') || '暂无分类。' };
 }
 
-async function executeListRecentRecords(args: Record<string, unknown>): Promise<ToolCallResult> {
+async function executeListRecentRecords(args: Record<string, unknown>, userId: string): Promise<ToolCallResult> {
   const limit = Math.min(Math.max(Number(args.limit ?? 10), 1), 30);
   const items = await prisma.record.findMany({
+    where: { userId },
     orderBy: { updatedAt: 'desc' },
     take: limit,
     include: { category: true }
@@ -367,10 +371,10 @@ async function executeListRecentRecords(args: Record<string, unknown>): Promise<
 
 // ---------- 写操作执行器 ----------
 
-async function executeGetRecord(args: Record<string, unknown>): Promise<ToolCallResult> {
+async function executeGetRecord(args: Record<string, unknown>, userId: string): Promise<ToolCallResult> {
   const recordId = typeof args.recordId === 'string' ? args.recordId.trim() : '';
   if (!recordId) return { ok: false, content: '', error: 'recordId 必填' };
-  const r = await prisma.record.findUnique({ where: { id: recordId }, include: { category: true } });
+  const r = await prisma.record.findFirst({ where: { id: recordId, userId }, include: { category: true } });
   if (!r) return { ok: true, content: `未找到 ID 为 ${recordId} 的记录。` };
   const dl = r.dueDate ? new Date(r.dueDate).toISOString().slice(0, 10) : '无';
   let values = '';
@@ -397,7 +401,7 @@ async function executeGetRecord(args: Record<string, unknown>): Promise<ToolCall
   };
 }
 
-async function executeCreateRecord(args: Record<string, unknown>): Promise<ToolCallResult> {
+async function executeCreateRecord(args: Record<string, unknown>, userId: string): Promise<ToolCallResult> {
   const name = typeof args.name === 'string' ? args.name.trim() : '';
   if (!name) return { ok: false, content: '', error: 'name 必填' };
 
@@ -405,9 +409,9 @@ async function executeCreateRecord(args: Record<string, unknown>): Promise<ToolC
   let categoryId = '';
   if (typeof args.category === 'string' && args.category.trim()) {
     const catName = args.category.trim();
-    const cat = await prisma.category.findFirst({ where: { name: catName } });
+    const cat = await prisma.category.findFirst({ where: { userId, name: catName } });
     if (!cat) {
-      const all = await prisma.category.findMany({ select: { name: true } });
+      const all = await prisma.category.findMany({ where: { userId }, select: { name: true } });
       const list = all.map((c) => c.name).join('、') || '(暂无分类，请先在系统里创建分类)';
       return {
         ok: false,
@@ -417,12 +421,12 @@ async function executeCreateRecord(args: Record<string, unknown>): Promise<ToolC
     }
     categoryId = cat.id;
   } else {
-    // 没给分类就用第一个存在的分类，或创建一个默认的
-    const first = await prisma.category.findFirst({ orderBy: { sort: 'asc' } });
+    // 没给分类就用当前用户第一个存在的分类，或创建一个默认的
+    const first = await prisma.category.findFirst({ where: { userId }, orderBy: { sort: 'asc' } });
     if (first) {
       categoryId = first.id;
     } else {
-      const created = await prisma.category.create({ data: { name: '未分类' } });
+      const created = await prisma.category.create({ data: { userId, name: '未分类' } });
       categoryId = created.id;
     }
   }
@@ -440,6 +444,7 @@ async function executeCreateRecord(args: Record<string, unknown>): Promise<ToolC
 
   const record = await prisma.record.create({
     data: {
+      userId,
       categoryId,
       name,
       sub: typeof args.sub === 'string' ? args.sub.trim() : '',
@@ -466,11 +471,11 @@ async function executeCreateRecord(args: Record<string, unknown>): Promise<ToolC
   };
 }
 
-async function executeUpdateRecord(args: Record<string, unknown>): Promise<ToolCallResult> {
+async function executeUpdateRecord(args: Record<string, unknown>, userId: string): Promise<ToolCallResult> {
   const recordId = typeof args.recordId === 'string' ? args.recordId.trim() : '';
   if (!recordId) return { ok: false, content: '', error: 'recordId 必填' };
 
-  const existing = await prisma.record.findUnique({ where: { id: recordId }, include: { category: true } });
+  const existing = await prisma.record.findFirst({ where: { id: recordId, userId }, include: { category: true } });
   if (!existing) return { ok: false, content: '', error: `未找到 ID 为 ${recordId} 的记录` };
 
   const data: Record<string, unknown> = {};
@@ -531,7 +536,7 @@ async function executeUpdateRecord(args: Record<string, unknown>): Promise<ToolC
   };
 }
 
-async function executeDeleteRecord(args: Record<string, unknown>): Promise<ToolCallResult> {
+async function executeDeleteRecord(args: Record<string, unknown>, userId: string): Promise<ToolCallResult> {
   const recordId = typeof args.recordId === 'string' ? args.recordId.trim() : '';
   const confirm = Boolean(args.confirm);
   if (!recordId) return { ok: false, content: '', error: 'recordId 必填' };
@@ -543,7 +548,7 @@ async function executeDeleteRecord(args: Record<string, unknown>): Promise<ToolC
     };
   }
 
-  const existing = await prisma.record.findUnique({ where: { id: recordId }, include: { category: true } });
+  const existing = await prisma.record.findFirst({ where: { id: recordId, userId }, include: { category: true } });
   if (!existing) return { ok: true, content: `记录 ${recordId} 不存在（可能已被删除）。` };
 
   const label = `${existing.name}（${existing.category?.name ?? '未分类'}）`;
@@ -551,7 +556,7 @@ async function executeDeleteRecord(args: Record<string, unknown>): Promise<ToolC
   return { ok: true, content: `🗑️ 已删除记录：${label}（${recordId}）` };
 }
 
-const REGISTRY: Record<string, (args: Record<string, unknown>) => Promise<ToolCallResult>> = {
+const REGISTRY: Record<string, (args: Record<string, unknown>, userId: string) => Promise<ToolCallResult>> = {
   // 只读工具
   search_records: executeSearchRecords,
   list_upcoming: executeListUpcoming,
@@ -566,7 +571,7 @@ const REGISTRY: Record<string, (args: Record<string, unknown>) => Promise<ToolCa
   delete_record: executeDeleteRecord
 };
 
-export async function executeToolCall(call: ToolCallInput): Promise<ToolCallResult> {
+export async function executeToolCall(call: ToolCallInput, userId: string): Promise<ToolCallResult> {
   const handler = REGISTRY[call.name];
   if (!handler) {
     return { ok: false, content: '', error: `未知工具 ${call.name}` };
@@ -582,7 +587,7 @@ export async function executeToolCall(call: ToolCallInput): Promise<ToolCallResu
     };
   }
   try {
-    return await handler(args);
+    return await handler(args, userId);
   } catch (e) {
     return {
       ok: false,

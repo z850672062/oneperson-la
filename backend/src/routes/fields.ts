@@ -59,13 +59,14 @@ function commonFields(categoryId: string) {
 fieldsRouter.get(
   '/',
   asyncHandler(async (req, res) => {
+    const userId = req.auth!.userId;
     const categoryId = typeof req.query.categoryId === 'string' ? req.query.categoryId : undefined;
 
     if (categoryId) {
-      const category = await prisma.category.findUnique({ where: { id: categoryId } });
+      const category = await prisma.category.findFirst({ where: { id: categoryId, userId } });
       if (!category) throw notFound('分类不存在');
       const fields = await prisma.fieldDef.findMany({
-        where: { categoryId },
+        where: { categoryId, userId },
         orderBy: [{ sort: 'asc' }, { createdAt: 'asc' }]
       });
       res.status(200).json({
@@ -75,6 +76,7 @@ fieldsRouter.get(
     }
 
     const fields = await prisma.fieldDef.findMany({
+      where: { userId },
       orderBy: [{ categoryId: 'asc' }, { sort: 'asc' }, { createdAt: 'asc' }]
     });
     res.status(200).json({ items: fields.map(serializeField) });
@@ -84,18 +86,20 @@ fieldsRouter.get(
 fieldsRouter.post(
   '/',
   asyncHandler(async (req, res) => {
+    const userId = req.auth!.userId;
     const body = createSchema.parse(req.body);
-    const category = await prisma.category.findUnique({ where: { id: body.categoryId } });
+    const category = await prisma.category.findFirst({ where: { id: body.categoryId, userId } });
     if (!category) throw notFound('分类不存在');
 
     const maxSort = await prisma.fieldDef.aggregate({
-      where: { categoryId: body.categoryId },
+      where: { categoryId: body.categoryId, userId },
       _max: { sort: true }
     });
 
     const field = await prisma.fieldDef.create({
       data: {
         categoryId: body.categoryId,
+        userId,
         name: body.name,
         group: body.group,
         type: body.type,
@@ -112,8 +116,9 @@ fieldsRouter.post(
 fieldsRouter.patch(
   '/:id',
   asyncHandler(async (req, res) => {
+    const userId = req.auth!.userId;
     const body = patchSchema.parse(req.body);
-    const existing = await prisma.fieldDef.findUnique({ where: { id: req.params.id } });
+    const existing = await prisma.fieldDef.findFirst({ where: { id: req.params.id, userId } });
     if (!existing) throw notFound('字段不存在');
 
     const field = await prisma.fieldDef.update({
@@ -135,7 +140,8 @@ fieldsRouter.patch(
 fieldsRouter.delete(
   '/:id',
   asyncHandler(async (req, res) => {
-    const existing = await prisma.fieldDef.findUnique({ where: { id: req.params.id } });
+    const userId = req.auth!.userId;
+    const existing = await prisma.fieldDef.findFirst({ where: { id: req.params.id, userId } });
     if (!existing) throw notFound('字段不存在');
     await prisma.fieldDef.delete({ where: { id: existing.id } });
     res.status(204).end();
