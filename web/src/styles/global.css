@@ -1957,7 +1957,8 @@ mark.search-hit {
 .sticky-row,
 .sticky-archive-row {
   display: flex;
-  align-items: center;
+  /* 内容换行后多行显示，行首元素与第一行文字对齐 */
+  align-items: flex-start;
   gap: 8px;
   padding: 7px 4px;
   border-bottom: 1px dashed var(--line);
@@ -1971,11 +1972,19 @@ mark.search-hit {
 .sticky-text {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  /* 长内容自动换行，不再省略号截断 */
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  text-overflow: clip;
   font-size: 13px;
+  line-height: 1.5;
   color: var(--text);
+}
+
+.sticky-row .ant-checkbox-wrapper {
+  margin-top: 2px;
 }
 
 .sticky-row .sticky-icon-btn {
