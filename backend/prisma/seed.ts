@@ -285,6 +285,20 @@ async function main() {
     }
   });
 
+  // 开源演示账号：用于 README 快速开始，与个人风格账号分离
+  const demoPasswordHash = await bcrypt.hash('Demo123456', 10);
+  await prisma.user.upsert({
+    where: { email: 'demo@oneperson.local' },
+    update: { username: 'demo', name: '演示用户', passwordHash: demoPasswordHash },
+    create: {
+      id: 'user-demo-public',
+      username: 'demo',
+      name: '演示用户',
+      email: 'demo@oneperson.local',
+      passwordHash: demoPasswordHash
+    }
+  });
+
   for (const category of categories) {
     await prisma.category.upsert({
       where: { id: category.id },
@@ -439,7 +453,7 @@ async function main() {
     create: { id: 'consent-privacy-v1', userId: user.id, kind: 'privacy', version: 'v1' }
   });
 
-  console.log('[seed] done: user, 8 categories, %d fields, 9 records, %d kb docs, 5 memories', fields.length, kbDocs.length);
+  console.log('[seed] done: users (含演示账号 demo), %d categories, %d fields, 9 records, %d kb docs, 5 memories', categories.length, fields.length, kbDocs.length);
 }
 
 main()

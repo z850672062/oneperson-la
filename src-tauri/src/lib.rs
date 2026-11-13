@@ -337,7 +337,7 @@ const SETUP_HTML: &str = r#"<!DOCTYPE html>
     <h1>欢迎使用一人法务</h1>
     <p class="sub">请输入服务器地址，保存后将直接打开工作台。<br>以后可通过菜单「设置 → 修改服务器地址」随时更换。</p>
     <label for="url">服务器地址</label>
-    <input id="url" type="text" placeholder="例如 http://example.com:8080" autocomplete="off" autofocus>
+    <input id="url" type="text" placeholder="例如 http://192.168.1.100:8080" autocomplete="off" autofocus>
     <div class="hint">支持 http / https，末尾斜杠可省略</div>
     <div class="err" id="err"></div>
     <button id="save">保存并进入</button>

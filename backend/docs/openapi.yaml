@@ -67,8 +67,8 @@ paths:
               type: object
               required: [username, password]
               properties:
-                username: { type: string, example: 大力出奇迹, description: 用户名或邮箱 }
-                password: { type: string, format: password, example: Legal1234 }
+                username: { type: string, example: demo, description: 用户名或邮箱 }
+                password: { type: string, format: password, example: Demo123456 }
       responses:
         '200':
           description: 登录成功
@@ -1212,7 +1212,7 @@ components:
       required: [id, username, name, email]
       properties:
         id: { type: string }
-        username: { type: string, example: 大力出奇迹 }
+        username: { type: string, example: demo }
         name: { type: string }
         email: { type: string, format: email }
 
