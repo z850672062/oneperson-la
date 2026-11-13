@@ -206,6 +206,29 @@ fn open_main_window(app: AppHandle) {
     }
 }
 
+/// 唤起主窗口；不存在时按配置创建（仅便签模式启动后的场景）
+fn open_main_window_or_create(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window(MAIN_LABEL) {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+        return;
+    }
+    let cfg = load_config(app);
+    let initial_url = match &cfg.server_url {
+        Some(u) => WebviewUrl::External(Url::parse(u).unwrap()),
+        None => WebviewUrl::CustomProtocol(Url::parse("setup://localhost/").unwrap()),
+    };
+    if let Ok(win) = WebviewWindowBuilder::new(app, MAIN_LABEL, initial_url)
+        .title("一人法务")
+        .inner_size(1440.0, 900.0)
+        .resizable(true)
+        .build()
+    {
+        let _ = win.set_focus();
+    }
+}
+
 fn show_sticky(app: &AppHandle) {
     if let Some(win) = app.get_webview_window(STICKY_LABEL) {
         let _ = win.show();
@@ -443,6 +466,11 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // 单实例：重复点击快捷方式时不再多开，而是唤起已有窗口。
+        // 该插件必须最先注册，确保在其它插件与窗口创建之前完成实例检查。
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            open_main_window_or_create(app);
+        }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--sticky-only"]),
