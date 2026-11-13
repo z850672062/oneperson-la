@@ -1992,6 +1992,18 @@ mark.search-hit {
   background: rgba(176, 67, 58, 0.08);
 }
 
+/* 编辑中的输入框占满文字区域 */
+.sticky-edit-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 编辑按钮保持中性色，仅删除用红色 */
+.sticky-row .sticky-edit-btn:hover {
+  color: var(--blue);
+  background: rgba(47, 111, 179, 0.08);
+}
+
 .sticky-loading {
   display: flex;
   justify-content: center;

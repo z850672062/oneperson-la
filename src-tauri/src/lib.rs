@@ -83,8 +83,12 @@ fn get_server_url(app: AppHandle) -> Option<String> {
 }
 
 /// 保存服务器地址并跳转到该地址
+///
+/// 注意：命令必须声明为 async。同步命令在 Windows 上跑在主线程，
+/// 在其中直接 navigate / 创建窗口会和事件循环相互等待，
+/// 表现为首次填写地址后一直卡在「正在连接」。
 #[tauri::command]
-fn save_server_url(app: AppHandle, url: String) -> Result<String, String> {
+async fn save_server_url(app: AppHandle, url: String) -> Result<String, String> {
     let mut url = url.trim().to_string();
     if url.is_empty() {
         return Err("地址不能为空".into());
@@ -102,20 +106,30 @@ fn save_server_url(app: AppHandle, url: String) -> Result<String, String> {
     cfg.server_url = Some(url.clone());
     save_config(&app, &cfg)?;
 
-    if let Some(win) = app.get_webview_window(MAIN_LABEL) {
-        let _ = win.navigate(parsed);
-    }
-    if let Some(sticky_url) = server_page_url(&url, "/sticky") {
-        match app.get_webview_window(STICKY_LABEL) {
-            Some(win) => {
-                let _ = win.navigate(sticky_url);
+    // 跳转主窗口与创建便签窗统一回到主线程执行，避免与事件循环互锁
+    let handle = app.clone();
+    let target = url.clone();
+    app.run_on_main_thread(move || {
+        if let Ok(parsed) = Url::parse(&target) {
+            if let Some(win) = handle.get_webview_window(MAIN_LABEL) {
                 let _ = win.show();
+                let _ = win.navigate(parsed);
             }
-            None => {
-                let _ = create_sticky_window(&app, &sticky_url);
+            if let Some(sticky_url) = server_page_url(&target, "/sticky") {
+                match handle.get_webview_window(STICKY_LABEL) {
+                    Some(win) => {
+                        let _ = win.navigate(sticky_url);
+                        let _ = win.show();
+                    }
+                    None => {
+                        let _ = create_sticky_window(&handle, &sticky_url);
+                    }
+                }
             }
         }
-    }
+    })
+    .map_err(|e| e.to_string())?;
+
     Ok(url)
 }
 

@@ -3,6 +3,7 @@ import { Button, Checkbox, DatePicker, Empty, Input, Modal, Popconfirm, Select, 
 import {
   CloseOutlined,
   DeleteOutlined,
+  EditOutlined,
   MinusOutlined,
   PlusOutlined,
   PushpinFilled,
@@ -18,6 +19,7 @@ import {
   listStickyNotes,
   revertStickyNote,
   suggestStickyNote,
+  updateStickyNote,
 } from '../api/stickyNotes'
 import { useCategoriesStore } from '../store/categories'
 import { getSettings } from '../api/settings'
@@ -84,6 +86,8 @@ export default function StickyNotesPanel({ variant = 'panel' }: StickyNotesPanel
   const [pinned, setPinned] = useState(readPinned)
   const [collapsed, setCollapsed] = useState(false)
   const [aiSuggest, setAiSuggest] = useState(true)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingText, setEditingText] = useState('')
 
   const categories = useCategoriesStore((state) => state.items)
   const loadCategories = useCategoriesStore((state) => state.load)
@@ -173,6 +177,32 @@ export default function StickyNotesPanel({ variant = 'panel' }: StickyNotesPanel
     try {
       await deleteStickyNote(id)
       setItems((prev) => prev.filter((note) => note.id !== id))
+    } catch (error) {
+      toastError(apiErrorMessage(error))
+    }
+  }
+
+  function startEdit(note: StickyNoteItem) {
+    setEditingId(note.id)
+    setEditingText(note.content)
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setEditingText('')
+  }
+
+  /** 提交编辑：回车或失焦保存，内容未变化或为空则直接放弃 */
+  async function commitEdit() {
+    const id = editingId
+    if (!id) return
+    const target = items.find((note) => note.id === id)
+    const content = editingText.trim()
+    cancelEdit()
+    if (!target || !content || content === target.content) return
+    try {
+      const updated = await updateStickyNote(id, content)
+      setItems((prev) => prev.map((note) => (note.id === id ? updated : note)))
     } catch (error) {
       toastError(apiErrorMessage(error))
     }
@@ -373,19 +403,51 @@ export default function StickyNotesPanel({ variant = 'panel' }: StickyNotesPanel
                   onChange={() => void handleCheck(note)}
                   aria-label={`完成：${note.content}`}
                 />
-                <span className="sticky-text" title={note.content}>
-                  {note.content}
-                </span>
-                <Popconfirm
-                  title="删除这条便签？"
-                  okText="删除"
-                  cancelText="取消"
-                  onConfirm={() => void handleDelete(note.id)}
-                >
-                  <button type="button" className="sticky-icon-btn" aria-label="删除便签">
-                    <DeleteOutlined />
-                  </button>
-                </Popconfirm>
+                {editingId === note.id ? (
+                  <Input
+                    size="small"
+                    autoFocus
+                    maxLength={500}
+                    className="sticky-edit-input"
+                    aria-label="编辑便签内容"
+                    value={editingText}
+                    onChange={(event) => setEditingText(event.target.value)}
+                    onPressEnter={() => void commitEdit()}
+                    onBlur={() => void commitEdit()}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') cancelEdit()
+                    }}
+                  />
+                ) : (
+                  <>
+                    <span
+                      className="sticky-text"
+                      title={`${note.content}（双击可编辑）`}
+                      onDoubleClick={() => startEdit(note)}
+                    >
+                      {note.content}
+                    </span>
+                    <button
+                      type="button"
+                      className="sticky-icon-btn sticky-edit-btn"
+                      aria-label="编辑便签"
+                      title="编辑"
+                      onClick={() => startEdit(note)}
+                    >
+                      <EditOutlined />
+                    </button>
+                    <Popconfirm
+                      title="删除这条便签？"
+                      okText="删除"
+                      cancelText="取消"
+                      onConfirm={() => void handleDelete(note.id)}
+                    >
+                      <button type="button" className="sticky-icon-btn" aria-label="删除便签">
+                        <DeleteOutlined />
+                      </button>
+                    </Popconfirm>
+                  </>
+                )}
               </div>
             ))
           ) : (
