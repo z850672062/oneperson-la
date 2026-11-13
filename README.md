@@ -10,7 +10,7 @@
 
 ## 演示视频
 
-[![一人法务 · 演示视频](docs/mockups/sticky-window-desktop.png)](https://github.com/z850672062/oneperson-la/releases/download/v0.1.0/oneperson-la-promo.mp4)
+[![一人法务 · 演示：便签随手记 → AI 归类 → 工作记录](docs/mockups/demo-preview.gif)](https://github.com/z850672062/oneperson-la/releases/download/v0.1.0/oneperson-la-promo.mp4)
 
 ▶ **[观看完整演示（约 78 秒）](https://github.com/z850672062/oneperson-la/releases/download/v0.1.0/oneperson-la-promo.mp4)**
 
