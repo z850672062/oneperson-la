@@ -8,6 +8,14 @@
 
 > 演示账号：`demo` / `Demo123456`
 
+## 演示视频
+
+[![一人法务 · 演示视频](docs/mockups/sticky-window-desktop.png)](https://github.com/z850672062/oneperson-la/releases/download/v0.1.0/oneperson-la-promo.mp4)
+
+▶ **[观看完整演示（约 78 秒）](https://github.com/z850672062/oneperson-la/releases/download/v0.1.0/oneperson-la-promo.mp4)**
+
+内容依次为：桌面便签随手记 → AI 归类归档 → 知识库接入与检索 → 法务对话（答案带出处）→ 报表生成 → 工作汇总 → 隐私与 AI 开关。
+
 ---
 
 ## 目录
