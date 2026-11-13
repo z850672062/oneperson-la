@@ -8,18 +8,27 @@
 
 > 演示账号：`demo` / `Demo123456`
 
-## 演示视频
+## 演示
 
-[![一人法务 · 演示：便签随手记 → AI 归类 → 工作记录](docs/mockups/demo-preview.gif)](https://github.com/z850672062/oneperson-la/releases/download/v0.1.0/oneperson-la-promo.mp4)
+**① 便签随手记 → AI 归类 → 归入工作记录**
 
-▶ **[观看完整演示（约 78 秒）](https://github.com/z850672062/oneperson-la/releases/download/v0.1.0/oneperson-la-promo.mp4)**
+[![便签随手记与 AI 归类](docs/mockups/demo-preview.gif)](https://github.com/z850672062/oneperson-la/releases/download/v0.1.0/oneperson-la-promo.mp4)
 
-内容依次为：桌面便签随手记 → AI 归类归档 → 知识库接入与检索 → 法务对话（答案带出处）→ 报表生成 → 工作汇总 → 隐私与 AI 开关。
+**② 知识库接入与检索：Obsidian 本地只读索引，命中即带出处**
+
+[![知识库接入与检索](docs/mockups/demo-preview-kb.gif)](https://github.com/z850672062/oneperson-la/releases/download/v0.1.0/oneperson-la-promo.mp4)
+
+**③ 法务对话：流式作答，引用自己的笔记，并沉淀记忆**
+
+[![法务对话](docs/mockups/demo-preview-chat.gif)](https://github.com/z850672062/oneperson-la/releases/download/v0.1.0/oneperson-la-promo.mp4)
+
+▶ **[观看完整演示视频（约 78 秒）](https://github.com/z850672062/oneperson-la/releases/download/v0.1.0/oneperson-la-promo.mp4)** — 另含工作汇总、报表生成、隐私与 AI 开关等场景。
 
 ---
 
 ## 目录
 
+- [演示](#演示)
 - [功能特性](#功能特性)
 - [技术栈](#技术栈)
 - [目录结构](#目录结构)
