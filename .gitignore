@@ -19,3 +19,6 @@ coverage/
 downloads/
 playwright-report/
 test-results/
+
+# TRAE 分享包产物
+.trae-html-share-packages/
